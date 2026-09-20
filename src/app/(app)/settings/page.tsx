@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { requireUser } from '@/lib/auth/current-user';
 import { MAX_ACTIVE_USERS, countActiveUsers, listUsers } from '@/lib/repo/users';
 import { listLeadStatuses } from '@/lib/repo/leads';
@@ -7,6 +8,8 @@ import { MIN_IDENTITY_CONFIDENCE, MIN_WEBSITE_CONFIDENCE } from '@/lib/qualifica
 import { ACCEPT_THRESHOLD, PROBABLE_THRESHOLD } from '@/lib/website/score';
 import { Alert, Badge, Card } from '@/components/ui';
 import { CreateUserForm, UserRow } from '@/components/user-admin';
+
+export const metadata: Metadata = { title: 'Settings' };
 
 export const dynamic = 'force-dynamic';
 

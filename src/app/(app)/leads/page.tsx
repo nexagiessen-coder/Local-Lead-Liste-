@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { requireUser } from '@/lib/auth/current-user';
 import { CATEGORIES } from '@/lib/discovery/categories';
 import { applyOpenNow, parseListQuery } from '@/lib/list-query';
@@ -8,6 +9,8 @@ import { TableFilters } from '@/components/table-filters';
 import { Pagination } from '@/components/pagination';
 import { Card, buttonPrimary } from '@/components/ui';
 import Link from 'next/link';
+
+export const metadata: Metadata = { title: 'Leads' };
 
 export const dynamic = 'force-dynamic';
 

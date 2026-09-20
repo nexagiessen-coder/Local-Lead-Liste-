@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { callingQueue, leadCounts, listLeadStatuses } from '@/lib/repo/leads';
@@ -9,6 +10,8 @@ import { DAY } from '@/lib/time';
 import { formatPhone, formatRelative } from '@/lib/format';
 import { Alert, Card, EmptyState, Stat, buttonSecondary } from '@/components/ui';
 import { LeadStatusBadge } from '@/components/status';
+
+export const metadata: Metadata = { title: 'Dashboard' };
 
 export const dynamic = 'force-dynamic';
 

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { requireUser } from '@/lib/auth/current-user';
 import { CATEGORIES } from '@/lib/discovery/categories';
 import { applyOpenNow, parseListQuery } from '@/lib/list-query';
@@ -7,6 +8,8 @@ import { BusinessTable } from '@/components/business-table';
 import { TableFilters } from '@/components/table-filters';
 import { Pagination } from '@/components/pagination';
 import { Card } from '@/components/ui';
+
+export const metadata: Metadata = { title: 'Research pool' };
 
 export const dynamic = 'force-dynamic';
 

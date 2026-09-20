@@ -1,4 +1,4 @@
-# Local Lead List — working notes
+# NEXA Leads — working notes
 
 A private lead-research and cold-calling app for a team of up to four people.
 The whole product hinges on one question being answered honestly: **does this

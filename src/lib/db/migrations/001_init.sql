@@ -1,4 +1,4 @@
--- Local Lead List — initial schema.
+-- NEXA Leads — initial schema.
 -- All timestamps are unix epoch milliseconds (UTC).
 
 CREATE TABLE users (

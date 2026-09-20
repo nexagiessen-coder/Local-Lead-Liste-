@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="sticky top-0 z-30 border-b border-line bg-surface">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5">
           <Link href="/dashboard" className="text-sm font-semibold text-ink">
-            Local Lead List
+            NEXA Leads
           </Link>
           <NavLinks />
           <div className="ml-auto flex items-center gap-3">

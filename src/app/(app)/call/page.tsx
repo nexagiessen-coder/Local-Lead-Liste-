@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { callingQueue, listLeadStatuses } from '@/lib/repo/leads';
@@ -8,6 +9,8 @@ import { BusinessDetail } from '@/components/business-detail';
 import { CallButton } from '@/components/call-button';
 import { LeadStatusBadge, OpenStateBadge, WebsiteStatusBadge } from '@/components/status';
 import { Card, EmptyState, buttonSecondary } from '@/components/ui';
+
+export const metadata: Metadata = { title: 'Call queue' };
 
 export const dynamic = 'force-dynamic';
 

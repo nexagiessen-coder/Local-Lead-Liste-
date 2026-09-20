@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Local Lead List',
+  title: { default: 'NEXA Leads', template: '%s · NEXA Leads' },
   description: 'Private research, verification and calling workspace for local business leads.',
   robots: { index: false, follow: false },
 };

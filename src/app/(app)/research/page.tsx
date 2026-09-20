@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { requireUser } from '@/lib/auth/current-user';
 import { CATEGORIES } from '@/lib/discovery/categories';
 import { describeProviders } from '@/lib/providers/registry';
@@ -5,6 +6,8 @@ import { listRuns } from '@/lib/repo/research';
 import { ResearchPanel } from '@/components/research-panel';
 import { Badge, Card, EmptyState } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
+
+export const metadata: Metadata = { title: 'Research' };
 
 export const dynamic = 'force-dynamic';
 

@@ -1,4 +1,4 @@
-# Local Lead List
+# NEXA Leads
 
 A private web application for a small team (up to 4 people) that researches,
 verifies, organises and calls local-business leads.

@@ -1,4 +1,4 @@
-# Local Lead List — Architecture & Implementation Plan
+# NEXA Leads — Architecture & Implementation Plan
 
 > Status: living document. Written before implementation, updated as the system evolves.
 

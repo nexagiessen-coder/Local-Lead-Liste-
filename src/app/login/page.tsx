@@ -19,7 +19,7 @@ export default async function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-subtle px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold text-ink">Local Lead List</h1>
+          <h1 className="text-xl font-semibold text-ink">NEXA Leads</h1>
           <p className="mt-1 text-sm text-ink-soft">Private research and calling workspace.</p>
         </div>
         <div className="card p-6">
