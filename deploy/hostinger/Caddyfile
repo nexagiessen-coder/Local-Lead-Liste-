@@ -1,0 +1,24 @@
+# Caddy terminates TLS and forwards to the app container.
+#
+# Certificates are obtained and renewed from Let's Encrypt automatically, so
+# there is nothing to install or cron. DOMAIN and CADDY_EMAIL come from .env.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# The app is the only upstream; it is not published on the host at all.
+	reverse_proxy app:3000
+
+	# Caddy adds HSTS on its own. These cover what the app cannot set itself.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

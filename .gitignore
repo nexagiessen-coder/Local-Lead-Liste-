@@ -28,3 +28,6 @@ npm-debug.log*
 
 # TypeScript incremental build info
 tsconfig.tsbuildinfo
+
+# Deployment secrets written on the server
+deploy/hostinger/.env

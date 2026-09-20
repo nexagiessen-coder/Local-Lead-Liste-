@@ -101,12 +101,31 @@ That shapes where it can live:
   working in the background after the response is sent.
 - It runs as **one instance**. A file database cannot be shared between several.
 
-So: a small VPS, a container host, Render, Fly.io, Railway — all fine.
+So: a small VPS (Hostinger, Hetzner, DigitalOcean), a container host, Render,
+Fly.io, Railway — all fine. Shared or "Business" web hosting is not, even when
+it advertises Node.js support, because it starts a process per request.
 **Vercel, Netlify and other serverless hosts are not**, however convenient they
 look. Deploying there gives you an app that appears to work and silently throws
 away your data.
 
-### Option 1 — on your own machine (fastest)
+### Option 1 — Hostinger VPS (one command, your own domain)
+
+Pick any **VPS** plan with an **Ubuntu** template — not shared, Business or
+Cloud hosting, which cannot keep a process alive between requests. Point your
+domain's A record at the VPS, SSH in as root, then:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nexagiessen-coder/Local-Lead-Liste-/claude/local-lead-list-app-drb359/deploy/hostinger/setup.sh -o setup.sh
+less setup.sh                                   # read it before you run it
+bash setup.sh leads.example.com you@example.com
+```
+
+That installs Docker, locks the firewall down to SSH and HTTPS, generates a
+session secret, and starts the app behind Caddy with an automatic Let's Encrypt
+certificate. Re-running it is safe. Full notes, backups and troubleshooting:
+[`deploy/hostinger/README.md`](deploy/hostinger/README.md).
+
+### Option 2 — on your own machine (fastest)
 
 ```bash
 npm install
@@ -119,7 +138,7 @@ npm run build && npm run start
 Open <http://localhost:3000> and complete the first-run setup. Everyone on the
 same network can reach it at `http://<your-machine-ip>:3000`.
 
-### Option 2 — Docker, one command
+### Option 3 — Docker, one command
 
 ```bash
 cp .env.example .env    # set SESSION_SECRET
@@ -134,7 +153,7 @@ docker compose exec app sh -c 'sqlite3 /app/data/nexa-leads.sqlite ".backup /app
   || docker compose cp app:/app/data ./backup
 ```
 
-### Option 3 — Render (a public URL in about five minutes)
+### Option 4 — Render (a public URL in about five minutes)
 
 The repository contains a `render.yaml` blueprint with the disk, health check
 and a generated `SESSION_SECRET` already configured.
@@ -149,7 +168,7 @@ requires a paid plan — the free tier has no disk and would reset the database 
 every deploy. `APP_URL` is optional here: the app falls back to Render's own
 external URL.
 
-### Option 4 — Fly.io
+### Option 5 — Fly.io
 
 ```bash
 fly launch --no-deploy --copy-config      # rename the app first in fly.toml

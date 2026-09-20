@@ -1,0 +1,64 @@
+# NEXA Leads on a Hostinger VPS.
+#
+# Two containers: the app, and Caddy in front of it for automatic HTTPS.
+# The app is never published on the host — only Caddy binds 80 and 443 — so the
+# only way in is through TLS on your domain.
+#
+#   docker compose -f deploy/hostinger/docker-compose.yml up -d --build
+
+services:
+  app:
+    build:
+      # The compose file lives two levels down from the repository root.
+      context: ../..
+      dockerfile: Dockerfile
+    image: nexa-leads
+    restart: unless-stopped
+    expose:
+      - '3000'
+    environment:
+      APP_URL: https://${DOMAIN:?set DOMAIN in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      DATABASE_PATH: /app/data/nexa-leads.sqlite
+      DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-DE}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Berlin}
+      DISCOVERY_PROVIDER: ${DISCOVERY_PROVIDER:-fixture}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-fixture}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-none}
+      PHOTO_PROVIDER: ${PHOTO_PROVIDER:-none}
+      OVERPASS_ENDPOINT: ${OVERPASS_ENDPOINT:-https://overpass-api.de/api/interpreter}
+      NOMINATIM_ENDPOINT: ${NOMINATIM_ENDPOINT:-https://nominatim.openstreetmap.org}
+      OSM_USER_AGENT: ${OSM_USER_AGENT:-NexaLeads/1.0 (self-hosted)}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      GOOGLE_CSE_API_KEY: ${GOOGLE_CSE_API_KEY:-}
+      GOOGLE_CSE_ENGINE_ID: ${GOOGLE_CSE_ENGINE_ID:-}
+      MIN_CHANNELS_FOR_NO_WEBSITE: ${MIN_CHANNELS_FOR_NO_WEBSITE:-2}
+      VERIFICATION_TTL_DAYS: ${VERIFICATION_TTL_DAYS:-30}
+    volumes:
+      - leads-data:/app/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here; losing this volume means re-issuing them.
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+
+volumes:
+  leads-data:
+  caddy-data:
+  caddy-config:
+  caddy-logs:
