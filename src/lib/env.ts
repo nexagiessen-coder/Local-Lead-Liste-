@@ -30,8 +30,23 @@ function oneOf<T extends string>(key: string, allowed: readonly T[], fallback: T
   return fallback;
 }
 
+/**
+ * The public URL of this installation. Explicit `APP_URL` wins; otherwise the
+ * URL common hosting platforms inject is used, so a first deploy works without
+ * having to know the generated hostname in advance.
+ */
+function resolveAppUrl(): string {
+  const explicit = str('APP_URL');
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const render = str('RENDER_EXTERNAL_URL');
+  if (render) return render.replace(/\/+$/, '');
+  const fly = str('FLY_APP_NAME');
+  if (fly) return `https://${fly}.fly.dev`;
+  return 'http://localhost:3000';
+}
+
 export const env = {
-  appUrl: str('APP_URL', 'http://localhost:3000')!,
+  appUrl: resolveAppUrl(),
   nodeEnv: str('NODE_ENV', 'development')!,
   databasePath: str('DATABASE_PATH', './data/local-lead-list.sqlite')!,
   sessionSecret: str('SESSION_SECRET'),

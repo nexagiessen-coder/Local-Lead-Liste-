@@ -1,0 +1,47 @@
+# NEXA Leads — Fly.io configuration.
+#
+#   fly launch --no-deploy --copy-config
+#   fly volumes create leads_data --size 1 --region fra
+#   fly secrets set SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")"
+#   fly deploy
+#
+# Rename `app` below to something unique before the first deploy.
+
+app = "nexa-leads"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATABASE_PATH = "/app/data/nexa-leads.sqlite"
+  PORT = "3000"
+  DEFAULT_COUNTRY = "DE"
+  DEFAULT_TIMEZONE = "Europe/Berlin"
+  DISCOVERY_PROVIDER = "fixture"
+  GEOCODING_PROVIDER = "fixture"
+  WEB_SEARCH_PROVIDER = "none"
+  PHOTO_PROVIDER = "none"
+  OSM_USER_AGENT = "NexaLeads/1.0 (self-hosted)"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_start_machines = true
+  # Research runs continue in the background after the response, so the machine
+  # must not be stopped between requests.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  path = "/api/health"
+  timeout = "5s"
+
+# The SQLite database lives here. One machine only — a file database cannot be
+# shared between instances.
+[mounts]
+  source = "leads_data"
+  destination = "/app/data"

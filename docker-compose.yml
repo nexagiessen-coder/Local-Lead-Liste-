@@ -1,0 +1,41 @@
+# NEXA Leads — run the whole app with one command:
+#
+#   cp .env.example .env     (then fill in SESSION_SECRET)
+#   docker compose up -d --build
+#
+# The database lives in a named volume, so `docker compose down` and a rebuild
+# keep your leads and call history.
+
+services:
+  app:
+    build: .
+    image: nexa-leads
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      # Set this to the URL people actually open. On https it also switches
+      # session cookies to Secure.
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required — generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"}
+      DATABASE_PATH: /app/data/nexa-leads.sqlite
+      DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-DE}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Berlin}
+      DISCOVERY_PROVIDER: ${DISCOVERY_PROVIDER:-fixture}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-fixture}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-none}
+      PHOTO_PROVIDER: ${PHOTO_PROVIDER:-none}
+      OVERPASS_ENDPOINT: ${OVERPASS_ENDPOINT:-https://overpass-api.de/api/interpreter}
+      NOMINATIM_ENDPOINT: ${NOMINATIM_ENDPOINT:-https://nominatim.openstreetmap.org}
+      OSM_USER_AGENT: ${OSM_USER_AGENT:-NexaLeads/1.0 (self-hosted)}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      GOOGLE_CSE_API_KEY: ${GOOGLE_CSE_API_KEY:-}
+      GOOGLE_CSE_ENGINE_ID: ${GOOGLE_CSE_ENGINE_ID:-}
+      MIN_CHANNELS_FOR_NO_WEBSITE: ${MIN_CHANNELS_FOR_NO_WEBSITE:-2}
+      VERIFICATION_TTL_DAYS: ${VERIFICATION_TTL_DAYS:-30}
+    volumes:
+      - leads-data:/app/data
+
+volumes:
+  leads-data:

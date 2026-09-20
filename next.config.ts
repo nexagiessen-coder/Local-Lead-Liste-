@@ -2,6 +2,9 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Emits a self-contained server bundle in .next/standalone, so the container
+  // image needs neither node_modules nor a package install at runtime.
+  output: 'standalone',
   poweredByHeader: false,
   serverExternalPackages: ['better-sqlite3'],
   async headers() {

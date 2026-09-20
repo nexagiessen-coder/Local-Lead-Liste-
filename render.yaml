@@ -1,0 +1,56 @@
+# NEXA Leads — Render blueprint.
+#
+# Render is a good fit because the app needs a persistent disk for its SQLite
+# database and a process that stays alive between requests (research runs in
+# the background). A disk requires a paid instance type; the free tier has no
+# persistent storage and would lose your leads on every deploy.
+
+services:
+  - type: web
+    name: nexa-leads
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /api/health
+    # One instance only: the database is a file on the attached disk.
+    numInstances: 1
+    disk:
+      name: nexa-leads-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      # Generated once by Render and never shown in the repository.
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /app/data/nexa-leads.sqlite
+      - key: DEFAULT_COUNTRY
+        value: DE
+      - key: DEFAULT_TIMEZONE
+        value: Europe/Berlin
+      # Start on the built-in demo dataset, then switch these to real providers
+      # in the Render dashboard once you have added the matching API keys.
+      - key: DISCOVERY_PROVIDER
+        value: fixture
+      - key: GEOCODING_PROVIDER
+        value: fixture
+      - key: WEB_SEARCH_PROVIDER
+        value: none
+      - key: PHOTO_PROVIDER
+        value: none
+      - key: OSM_USER_AGENT
+        value: NexaLeads/1.0 (self-hosted)
+      # Set these in the dashboard when you switch providers on. Leave unset
+      # here so no key is ever committed.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ENGINE_ID
+        sync: false
+      # APP_URL is optional on Render: the app falls back to RENDER_EXTERNAL_URL.
+      - key: APP_URL
+        sync: false

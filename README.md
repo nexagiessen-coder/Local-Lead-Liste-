@@ -88,17 +88,89 @@ Out of the box the app runs in **demo mode**: it uses a built-in offline dataset
 so you can try the whole workflow with no API keys. Demo records are badged
 everywhere they appear and are never presented as real research.
 
-### Production
+---
+
+## Putting it online
+
+NEXA Leads is a normal long-running web server with a SQLite database on disk.
+That shapes where it can live:
+
+- It needs a **persistent disk**. The database is a file; a platform with an
+  ephemeral filesystem loses every lead on each deploy.
+- It needs a **process that stays alive between requests**. A research run keeps
+  working in the background after the response is sent.
+- It runs as **one instance**. A file database cannot be shared between several.
+
+So: a small VPS, a container host, Render, Fly.io, Railway — all fine.
+**Vercel, Netlify and other serverless hosts are not**, however convenient they
+look. Deploying there gives you an app that appears to work and silently throws
+away your data.
+
+### Option 1 — on your own machine (fastest)
 
 ```bash
-npm run build
-npm run start
+npm install
+cp .env.example .env
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # paste into SESSION_SECRET
+npm run db:migrate
+npm run build && npm run start
 ```
 
-Run it behind a TLS-terminating reverse proxy and set `APP_URL` to the public
-`https://…` URL — that switches session cookies to `Secure` and tightens the
-CSRF origin check. Back up `./data/local-lead-list.sqlite` (plus the `-wal`
-file) like any other database.
+Open <http://localhost:3000> and complete the first-run setup. Everyone on the
+same network can reach it at `http://<your-machine-ip>:3000`.
+
+### Option 2 — Docker, one command
+
+```bash
+cp .env.example .env    # set SESSION_SECRET
+docker compose up -d --build
+```
+
+The database lives in a named volume, so rebuilds and `docker compose down`
+keep your leads and call history. To back up:
+
+```bash
+docker compose exec app sh -c 'sqlite3 /app/data/nexa-leads.sqlite ".backup /app/data/backup.sqlite"' \
+  || docker compose cp app:/app/data ./backup
+```
+
+### Option 3 — Render (a public URL in about five minutes)
+
+The repository contains a `render.yaml` blueprint with the disk, health check
+and a generated `SESSION_SECRET` already configured.
+
+1. Go to **<https://dashboard.render.com/blueprints>** → *New Blueprint Instance*.
+2. Pick this repository and the branch that holds the app.
+3. Render reads `render.yaml`, attaches a 1 GB disk and deploys.
+4. Open the URL it gives you and complete the first-run setup.
+
+The blueprint asks for the `starter` instance type because a persistent disk
+requires a paid plan — the free tier has no disk and would reset the database on
+every deploy. `APP_URL` is optional here: the app falls back to Render's own
+external URL.
+
+### Option 4 — Fly.io
+
+```bash
+fly launch --no-deploy --copy-config      # rename the app first in fly.toml
+fly volumes create leads_data --size 1 --region fra
+fly secrets set SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")"
+fly deploy
+```
+
+`fly.toml` keeps one machine running and mounts the volume at `/app/data`.
+
+### After the first deploy
+
+1. Open the URL and create the administrator account on the setup screen.
+2. Add your colleagues in **Settings → Team** (four seats in total).
+3. Switch the providers off the demo dataset — see below. Until you do, every
+   business is clearly badged as demo data.
+4. Set `APP_URL` to the public `https://…` address if your host does not provide
+   one automatically. It switches session cookies to `Secure` and tightens the
+   CSRF origin check.
+
+Back up `data/nexa-leads.sqlite` (and its `-wal` file) like any other database.
 
 ---
 
@@ -148,6 +220,10 @@ npm run test:e2e    # browser smoke test against a running server
 The end-to-end smoke test drives a real browser through setup → research →
 verification → promotion → calling → filtering. It needs the app running
 (`npm run start`) and Playwright's Chromium available.
+
+`GET /api/health` returns `{"status":"ok"}` when the process is up and the
+database answers. It is unauthenticated and reveals nothing else, so it is safe
+to point a load balancer or uptime monitor at it.
 
 ### Project layout
 
