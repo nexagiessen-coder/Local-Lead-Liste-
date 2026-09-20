@@ -1,0 +1,97 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Bright, light, low-chrome. Colour is reserved for status, alerts and
+ * actions — the table itself stays black on white so it reads like a
+ * spreadsheet.
+ */
+@theme {
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-subtle: #f7f8fa;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+
+  --color-ink: #101828;
+  --color-ink-soft: #475467;
+  --color-ink-muted: #8a94a6;
+
+  --color-accent: #1d4ed8;
+  --color-accent-soft: #eff4ff;
+  --color-accent-ink: #1e40af;
+
+  --color-good: #067647;
+  --color-good-soft: #ecfdf3;
+  --color-info: #175cd3;
+  --color-info-soft: #eff8ff;
+  --color-warn: #b54708;
+  --color-warn-soft: #fffaeb;
+  --color-bad: #b42318;
+  --color-bad-soft: #fef3f2;
+  --color-neutral: #475467;
+  --color-neutral-soft: #f2f4f7;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible, consistent focus for keyboard users everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect a user's motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@utility card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+}
+
+/* Skip link, visible only when focused. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 0 0 8px 0;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+/* Tables scroll horizontally rather than squashing their columns. */
+.table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+/* Only the main spreadsheet needs a wide minimum; small tables fit as they are. */
+.table-scroll table.table-wide {
+  min-width: 1100px;
+}

@@ -1,0 +1,30 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+
+# Environment / secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Local database files
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+.DS_Store
+*.log
+npm-debug.log*
+.vscode/
+.idea/
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
