@@ -47,7 +47,12 @@ If any one of these fails, the status is `REQUIRES_MANUAL_CHECK` or
 - Never merge two businesses on name similarity alone. Same name + different
   address or phone = separate locations (branches), kept separate.
 - Never let a social media profile stand in for a website — and never let its
-  existence alone prove there is no website either. Record it as context.
+  existence alone prove there is no website either. Resolve it (see below), then
+  judge on what the resolution found.
+- Never fetch `facebook.com` or `instagram.com` directly. Their terms forbid
+  automated collection and the pages are login-walled, so a scraper returns a
+  login page that looks exactly like "no website found" — the most dangerous
+  possible failure mode for this product.
 - Never invent opening hours, addresses, phone numbers or descriptions. Unknown
   is `null`, and the UI renders it as "unknown".
 - Never let a natural-language command, an override flag or a performance
@@ -82,6 +87,46 @@ Conflicting data between sources forces `NEEDS_REVIEW` and never auto-resolves.
 5. Within 60 m **and** name similarity ≥ 0.85 → same business (unless phones
    conflict, which makes it `review`).
 6. Same name elsewhere → `branch`: a separate business, cross-linked.
+
+## Social profile resolution
+
+A Facebook- or Instagram-only business is the most common ambiguous case: either
+a perfect lead or a website we failed to find. The social channel resolves it
+automatically, through routes that need no access to the platform itself:
+
+1. **The handle** becomes domain candidates (`@rasierklinge.giessen` →
+   `rasierklingegiessen.de`, `rasierklinge-giessen.de`). These are candidates
+   only — each still has to pass full page-level matching.
+2. **A targeted search for the handle**, which surfaces both the domain and the
+   "Website" field that search engines index from the social page. Reading our
+   own provider's snippet needs no platform access.
+3. **The business's own link-in-bio page** (linktr.ee, beacons.ai and similar),
+   which is a public link directory that exists to be followed. Outbound links
+   from it count as `declared` — the business published them.
+
+The channel reports honestly:
+
+- no profiles found → `ok`
+- profiles found and worked through → `ok`
+- profiles found but no search provider → `unavailable` (blocks "no website")
+- a search failed, or a published link page could not be read → `error`
+  (blocks "no website" — what that page lists is unknown)
+
+Only after this runs successfully may a social-only business be recorded as
+`VERIFIED_NO_WEBSITE`, and its confidence is reduced (−12 for any social
+presence, a further −5 when the profile nominates a social page as its
+"website") because the platform itself stays a blind spot.
+
+## Candidate origin
+
+Every candidate carries an origin, which decides both its weight and how a
+failure to load it is read:
+
+| Origin | Source | Weight | Unreachable means |
+| --- | --- | --- | --- |
+| `declared` | the profile's website field, or the business's own link page | +20, counts as a strong signal | an open question |
+| `found` | a search result | none | an open question |
+| `derived` | built from the name or a handle | none | nothing is hosted there |
 
 ## Candidate scoring
 

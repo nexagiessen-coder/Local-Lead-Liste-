@@ -27,7 +27,15 @@ export class FixtureHttpFetcher implements HttpFetcher {
       const host = getHostname(current);
       if (!host) throw new ProviderError('fixture-http', `Invalid URL: ${current}`);
 
-      const page = FIXTURE_PAGES[host];
+      // Hosts that serve several pages (link-in-bio services) are keyed by
+      // host + path; everything else is keyed by host alone.
+      let path = '';
+      try {
+        path = new URL(current).pathname.replace(/\/+$/, '');
+      } catch {
+        path = '';
+      }
+      const page = FIXTURE_PAGES[`${host}${path}`] ?? FIXTURE_PAGES[host];
       if (!page) {
         throw new ProviderError('fixture-http', `No host found for ${host} (demo web).`, {
           retryable: false,

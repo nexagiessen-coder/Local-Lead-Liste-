@@ -4,6 +4,7 @@ import { normalizeText, tokenCoverage, distinctiveTokens } from '@/lib/normalize
 import { domainNameOverlap, registrableDomain } from '@/lib/normalize/domain';
 import type { ResolvedIdentity } from '@/lib/identity/identity';
 import type { CandidateDecision, CandidateSignal, WebsiteChannel } from '@/lib/types';
+import type { CandidateOrigin } from './candidates';
 import type { PageSignals } from './extract';
 
 /**
@@ -24,7 +25,8 @@ export const WEIGHTS = {
   nameMatchPartial: 10,
   structuredMatch: 12,
   domainOverlap: 8,
-  providerDeclared: 20,
+  /** The business itself published this link — on its profile or its link page. */
+  declaredLink: 20,
   phoneConflict: -40,
   postalConflict: -20,
   nameAbsent: -15,
@@ -34,12 +36,16 @@ export const ACCEPT_THRESHOLD = 70;
 export const PROBABLE_THRESHOLD = 45;
 
 /** Signals strong enough to carry an acceptance on their own merit. */
-const STRONG_SIGNAL_KEYS = new Set(['phone_match', 'address_match', 'provider_declared']);
+const STRONG_SIGNAL_KEYS = new Set(['phone_match', 'address_match', 'declared_link']);
 
 export interface ScoreInput {
   identity: ResolvedIdentity;
   signals: PageSignals;
   channel: WebsiteChannel;
+  /** Whether the business published this link, a third party surfaced it, or we derived it. */
+  origin: CandidateOrigin;
+  /** Wording for the "declared" signal, when the business published the link. */
+  declaredBy?: string;
   url: string;
   finalUrl: string;
   redirects: string[];
@@ -56,7 +62,7 @@ export interface ScoreOutput {
 }
 
 export function scoreCandidate(input: ScoreInput): ScoreOutput {
-  const { identity, signals, channel } = input;
+  const { identity, signals } = input;
   const out: CandidateSignal[] = [];
   const conflicts: string[] = [];
   let score = 0;
@@ -219,14 +225,16 @@ export function scoreCandidate(input: ScoreInput): ScoreOutput {
     }
   }
 
-  // --- Declared by the business profile ------------------------------------
-  if (channel === 'provider_field') {
-    score += WEIGHTS.providerDeclared;
+  // --- Declared by the business itself -------------------------------------
+  // The business profile's website field, or a link the business publishes on
+  // its own link-in-bio page. Both are the business pointing at its own site.
+  if (input.origin === 'declared') {
+    score += WEIGHTS.declaredLink;
     out.push({
-      key: 'provider_declared',
-      label: 'Listed as the website on the business profile',
-      points: WEIGHTS.providerDeclared,
-      detail: 'The discovery source records this domain as the business website.',
+      key: 'declared_link',
+      label: 'Published by the business as its own link',
+      points: WEIGHTS.declaredLink,
+      detail: input.declaredBy ?? 'The business publishes this domain as its own.',
     });
   }
 

@@ -43,6 +43,10 @@ up for future contributors in `.claude/skills/lead-verification/SKILL.md`.
   matching phone number, a matching street + postal code, or the business
   profile itself declaring the domain.
 - Two businesses are never merged on a name alone.
+- A Facebook or Instagram profile is resolved, not guessed at: the handle is
+  turned into domain candidates and searched, and any link-in-bio page the
+  business publishes is followed. Only when all of that completes and finds
+  nothing can the business count as having no website.
 - Unknown data stays unknown. Opening hours, addresses and phone numbers are
   never invented, and anything unparsed is shown verbatim and marked unverified.
 
@@ -197,6 +201,31 @@ Up to four active accounts share one research pool and one lead list. Leads can
 be assigned; the calling queue puts a caller's own leads ahead of everyone
 else's so two people do not work the same lead at once. Call history is
 per-user, and the dashboard shows team activity.
+
+## Social profiles
+
+Businesses whose only visible presence is a Facebook page or an Instagram
+account used to need a human to check them. They are now resolved automatically:
+
+1. the handle is turned into domain candidates (`@rasierklinge.giessen` →
+   `rasierklingegiessen.de`, `rasierklinge-giessen.de`),
+2. the handle is searched, which surfaces both the domain and the "Website"
+   field that search engines index from the social page, and
+3. any link-in-bio page the business publishes (linktr.ee, beacons.ai and
+   similar) is followed and every outbound link is checked.
+
+Everything found goes through the same page-level matching as any other
+candidate, so a domain that merely matches the handle cannot slip through — it
+still has to carry the business's own phone number or address.
+
+**The app never fetches facebook.com or instagram.com.** Their terms forbid
+automated collection, and both are login-walled — a scraper would return a login
+page, which looks exactly like "no website found". That is the most dangerous
+failure this product can have, so the resolution routes above are used instead.
+
+If a social profile exists but the channel could not complete — no search
+provider, a failed search, or a link page that would not load — the business
+goes to **Requires manual check**, never to "no website".
 
 ## Known limits
 

@@ -160,7 +160,7 @@ export const CHANNEL_LABELS: Record<WebsiteChannel, string> = {
   provider_field: 'Business profile website field',
   search_engine: 'Web search',
   domain_guess: 'Domain candidates',
-  social_profile: 'Social profiles',
+  social_profile: 'Social profile resolution',
   directory: 'Business directories',
 };
 

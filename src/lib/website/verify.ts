@@ -15,16 +15,20 @@ import {
   domainGuessChannel,
   providerFieldChannel,
   searchEngineChannel,
-  socialProfileChannel,
   type DiscoveredCandidate,
 } from './candidates';
+import { investigateSocialProfiles } from './social';
 import { extractPageSignals } from './extract';
 import { scoreCandidate } from './score';
 
 export const ENGINE_VERSION = 'website-verify/1.0.0';
 
-/** Upper bound on page fetches per business, for cost and politeness. */
-const MAX_FETCHES = 10;
+/**
+ * Upper bound on page fetches per business, for cost and politeness. Candidates
+ * are ordered declared → found → derived before the cap is applied, so the cap
+ * can only ever drop the weakest guesses.
+ */
+const MAX_FETCHES = 14;
 
 /** Below this confidence a "no website" conclusion is downgraded to manual check. */
 const NO_WEBSITE_MIN_CONFIDENCE = 70;
@@ -105,17 +109,33 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
     if (domain) seenDomains.add(domain);
   }
 
-  const guessOutcome = domainGuessChannel(identity, seenDomains);
+  // The social channel actively resolves Facebook and Instagram profiles into
+  // real domains, rather than leaving them as an open question for a person.
+  // It runs before the name-based guesses so that a domain reached through a
+  // handle is credited to the profile that led us there.
   const socialProfiles = [...new Set([...providerOutcome.socialProfiles, ...searchOutcome.socialProfiles])];
-  const socialOutcome = socialProfileChannel(socialProfiles);
+  const socialOutcome = await investigateSocialProfiles({
+    identity,
+    socialUrls: socialProfiles,
+    search: input.search,
+    fetcher: input.fetcher,
+    alreadySeen: seenDomains,
+  });
+  for (const candidate of socialOutcome.candidates) {
+    const domain = registrableDomain(candidate.url);
+    if (domain) seenDomains.add(domain);
+  }
+
+  const guessOutcome = domainGuessChannel(identity, seenDomains);
   const directoryListings = [...new Set(searchOutcome.directoryListings)];
   const directoryOutcome = directoryChannel(directoryListings);
 
+  // Listed in the order they ran.
   const channels: ChannelResult[] = [
     providerOutcome.result,
     searchOutcome.result,
-    guessOutcome.result,
     socialOutcome.result,
+    guessOutcome.result,
     directoryOutcome.result,
   ];
 
@@ -123,14 +143,23 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
   const profileDeclaredSocial = providerOutcome.result.detail?.includes('social media page') ?? false;
 
   // --- Evaluate candidates -------------------------------------------------
+  // Ordered by how much the origin is worth, so the fetch cap only ever drops
+  // the weakest guesses.
+  const ORIGIN_ORDER: Record<DiscoveredCandidate['origin'], number> = { declared: 0, found: 1, derived: 2 };
   const queue: DiscoveredCandidate[] = dedupeByDomain([
     ...providerOutcome.candidates,
     ...searchOutcome.candidates,
+    ...socialOutcome.candidates,
     ...guessOutcome.candidates,
-  ]);
+  ]).sort((a, b) => ORIGIN_ORDER[a.origin] - ORIGIN_ORDER[b.origin]);
 
   const candidates: WebsiteCandidate[] = [];
+  const derivedDomains = new Set<string>();
   for (const item of queue.slice(0, MAX_FETCHES)) {
+    if (item.origin === 'derived') {
+      const domain = registrableDomain(item.url);
+      if (domain) derivedDomains.add(domain);
+    }
     candidates.push(await evaluateCandidate(item, input));
   }
 
@@ -138,7 +167,7 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
   const probable = candidates.filter((c) => c.decision === 'PROBABLE').sort((a, b) => b.score - a.score);
   /** A declared or searched site we could not reach — its existence is unresolved. */
   const unreachableImportant = candidates.filter(
-    (c) => c.decision === 'UNREACHABLE' && c.sourceChannel !== 'domain_guess',
+    (c) => c.decision === 'UNREACHABLE' && !derivedDomains.has(c.domain),
   );
   /** Rejected, but mentions the business and contradicts nothing: still open. */
   const ambiguous = candidates.filter(
@@ -154,13 +183,25 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
 
   for (const candidate of candidates) evidence.push(candidateEvidence(candidate));
   for (const channel of channels) evidence.push(channelEvidence(channel));
-  for (const profile of socialProfiles) {
+  for (const profile of socialOutcome.profiles) {
     evidence.push({
       kind: 'social_profile',
-      statement: 'Social media profile found.',
-      detail: 'A social profile is not a website. It was not used to confirm or rule out a website.',
-      sourceLabel: registrableDomain(profile) ?? 'social',
-      sourceUrl: profile,
+      statement: `${profile.platform} profile found${profile.handle ? ` (@${profile.handle})` : ''}.`,
+      detail:
+        'A social profile is not a website. The handle was turned into domain candidates and searched, ' +
+        'and any link page the business publishes was followed, so this profile was resolved rather than assumed.',
+      sourceLabel: profile.platform,
+      sourceUrl: profile.url,
+      stance: 'neutral',
+    });
+  }
+  for (const page of socialOutcome.linkPagesFollowed) {
+    evidence.push({
+      kind: 'link_in_bio',
+      statement: 'Followed the business\u2019s own link page.',
+      detail: 'Link-in-bio pages are public link directories meant to be followed; every outbound link was checked.',
+      sourceLabel: registrableDomain(page) ?? 'link page',
+      sourceUrl: page,
       stance: 'neutral',
     });
   }
@@ -240,16 +281,6 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
     );
   }
 
-  if (profileDeclaredSocial) {
-    return finish(
-      'REQUIRES_MANUAL_CHECK',
-      45,
-      null,
-      'The business profile nominates a social media page as its website. That page may or may not link to a real site, ' +
-        'so this business is not counted as "no website" without a human check.',
-    );
-  }
-
   if (ambiguous.length > 0) {
     return finish(
       'WEBSITE_UNCERTAIN',
@@ -293,7 +324,12 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
   // --- "No website" — the only conclusion that needs everything to line up --
   let confidence = 90;
   if (okChannels.length >= 3) confidence += 5;
-  if (socialProfiles.length > 0) confidence -= 12;
+  // A resolved social presence still lowers confidence: the profile was
+  // investigated, but a platform we cannot read directly remains a blind spot.
+  if (socialOutcome.profiles.length > 0) confidence -= 12;
+  // The business nominating a social page as its "website" is the weakest case
+  // of all, so it costs a little more.
+  if (profileDeclaredSocial) confidence -= 5;
 
   if (confidence < NO_WEBSITE_MIN_CONFIDENCE) {
     return finish('REQUIRES_MANUAL_CHECK', confidence, null, 'Evidence for "no website" did not reach the required confidence.');
@@ -304,7 +340,11 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
     statement: 'No official website found by any completed channel.',
     detail:
       `Identity confirmed · ${okChannels.length} channel(s) completed · ` +
-      `${candidates.length} candidate domain(s) checked and ruled out.`,
+      `${candidates.length} candidate domain(s) checked and ruled out` +
+      (socialOutcome.profiles.length > 0
+        ? ` · ${socialOutcome.profiles.length} social profile(s) resolved`
+        : '') +
+      '.',
     sourceLabel: 'Verification engine',
     sourceUrl: null,
     stance: 'supports',
@@ -316,7 +356,9 @@ export async function verifyWebsite(input: VerifyInput): Promise<VerifyResult> {
     null,
     `Identity confirmed and ${okChannels.length} research channel(s) completed without finding an official website. ` +
       `${candidates.length} candidate domain(s) were checked and ruled out.` +
-      (socialProfiles.length > 0 ? ' A social profile exists but is not a website.' : ''),
+      (socialOutcome.profiles.length > 0
+        ? ` ${socialOutcome.profiles.length} social profile(s) were resolved without finding an own website.`
+        : ''),
   );
 }
 
@@ -329,6 +371,8 @@ async function evaluateCandidate(item: DiscoveredCandidate, input: VerifyInput):
       identity: input.identity,
       signals,
       channel: item.channel,
+      origin: item.origin,
+      declaredBy: item.declaredBy,
       url: item.url,
       finalUrl: page.finalUrl,
       redirects: page.redirects,
@@ -349,10 +393,11 @@ async function evaluateCandidate(item: DiscoveredCandidate, input: VerifyInput):
   } catch (error) {
     const message = error instanceof ProviderError ? error.message : String(error);
     const retryable = error instanceof ProviderError ? error.retryable : true;
-    // A guessed domain that does not resolve is simply not a website.
-    // A declared or searched URL that fails is an unresolved question.
+    // A domain we derived ourselves that does not resolve is simply not a
+    // website. A link the business published, or one a search surfaced, failing
+    // to load is an unresolved question.
     const decision: CandidateDecision =
-      item.channel === 'domain_guess' && !retryable ? 'REJECTED' : 'UNREACHABLE';
+      item.origin === 'derived' && !retryable ? 'REJECTED' : 'UNREACHABLE';
     return {
       url: item.url,
       finalUrl: null,

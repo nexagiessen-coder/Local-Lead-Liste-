@@ -70,12 +70,6 @@ describe('website verification — never claiming "no website" without proof', (
     expect(result.candidates[0]?.decisionReason).toMatch(/parked/i);
   });
 
-  it('requires a manual check when the profile nominates a social page as its website', async () => {
-    const result = await verify('demo/3'); // facebook.com/... in the website field
-    expect(result.status).toBe('REQUIRES_MANUAL_CHECK');
-    expect(result.summary).toMatch(/social media/i);
-  });
-
   it('never concludes "no website" when the identity is not confirmed', async () => {
     const result = await verify('demo/9'); // no phone number
     expect(result.status).not.toBe('VERIFIED_NO_WEBSITE');
@@ -93,6 +87,75 @@ describe('website verification — never claiming "no website" without proof', (
     });
     expect(result.status).toBe('IDENTITY_UNVERIFIED');
     expect(result.candidates).toHaveLength(0);
+  });
+});
+
+describe('social profile resolution (Facebook and Instagram)', () => {
+  it('resolves a Facebook-only business to its real website through its link page', async () => {
+    // demo/3 lists a Facebook page as its "website". The engine takes the
+    // handle, searches for it, finds the business's own link-in-bio page,
+    // follows it, and lands on the real site — with no human involved.
+    const result = await verify('demo/3');
+    expect(result.status).toBe('VERIFIED_WEBSITE');
+    expect(result.acceptedUrl).toContain('cutandshave-giessen.de');
+
+    const accepted = result.candidates.find((c) => c.domain === 'cutandshave-giessen.de');
+    expect(accepted?.sourceChannel).toBe('social_profile');
+    expect(accepted?.signals.some((s) => s.key === 'declared_link')).toBe(true);
+    expect(result.evidence.some((e) => e.kind === 'link_in_bio')).toBe(true);
+  });
+
+  it('concludes "no website" automatically when a Facebook page leads nowhere', async () => {
+    // demo/18 has a Facebook page and nothing behind it. This used to be a
+    // manual check; the handle is now searched and turned into domains first.
+    const result = await verify('demo/18');
+    expect(result.status).toBe('VERIFIED_NO_WEBSITE');
+    expect(result.confidence).toBeGreaterThanOrEqual(70);
+
+    const social = result.channels.find((c) => c.channel === 'social_profile');
+    expect(social?.status).toBe('ok');
+    expect(social?.detail).toMatch(/facebook @rasierklinge\.giessen/i);
+    expect(result.evidence.some((e) => e.kind === 'social_profile')).toBe(true);
+  });
+
+  it('rejects a domain that matches the handle but belongs to someone else', async () => {
+    // nagelbarlisa.de exists — for a different salon in Hamburg.
+    const result = await verify('demo/19');
+    const impostor = result.candidates.find((c) => c.domain === 'nagelbarlisa.de');
+    expect(impostor?.decision).toBe('REJECTED');
+    expect(impostor?.signals.some((s) => s.key === 'phone_conflict')).toBe(true);
+    expect(result.status).toBe('VERIFIED_NO_WEBSITE');
+    expect(result.acceptedUrl).toBeNull();
+  });
+
+  it('requires a manual check when the business\u2019s own link page cannot be read', async () => {
+    // demo/20 publishes a linktr.ee that is down. What it lists is unknown, so
+    // the question stays open rather than resolving to "no website".
+    const result = await verify('demo/20');
+    expect(result.status).toBe('REQUIRES_MANUAL_CHECK');
+    expect(result.channels.find((c) => c.channel === 'social_profile')?.status).toBe('error');
+  });
+
+  it('cannot resolve social profiles without a search provider, and says so', async () => {
+    const result = await verify('demo/18', { search: new NoWebSearchProvider() });
+    expect(result.status).toBe('REQUIRES_MANUAL_CHECK');
+    const social = result.channels.find((c) => c.channel === 'social_profile');
+    expect(social?.status).toBe('unavailable');
+  });
+
+  it('lowers confidence for a business whose profile nominates a social page', async () => {
+    const declaredSocial = await verify('demo/18'); // Facebook as its "website"
+    const plain = await verify('demo/2'); // no social presence at all
+    expect(declaredSocial.status).toBe('VERIFIED_NO_WEBSITE');
+    expect(plain.status).toBe('VERIFIED_NO_WEBSITE');
+    expect(declaredSocial.confidence).toBeLessThan(plain.confidence);
+  });
+
+  it('never accepts a handle-derived domain without page-level proof', async () => {
+    const result = await verify('demo/19');
+    const derived = result.candidates.filter((c) => c.sourceChannel === 'social_profile');
+    expect(derived.length).toBeGreaterThan(0);
+    expect(derived.every((c) => c.decision !== 'ACCEPTED')).toBe(true);
   });
 });
 

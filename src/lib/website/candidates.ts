@@ -18,11 +18,28 @@ import type { ChannelResult, WebsiteChannel } from '@/lib/types';
  * difference between "looked and found nothing" and "could not look".
  */
 
+/**
+ * Where a candidate URL came from. This changes how it is weighed and how a
+ * failure to reach it is read:
+ *
+ * - `declared` — the business itself published this link (its profile's website
+ *   field, or its own link-in-bio page). Carries weight, and being unreachable
+ *   is an open question.
+ * - `found`    — a third party surfaced it (a search result). No inherent
+ *   weight; unreachable is an open question.
+ * - `derived`  — we constructed it from the name or a social handle. No weight
+ *   at all, and if nothing is hosted there, that is simply a dead end.
+ */
+export type CandidateOrigin = 'declared' | 'found' | 'derived';
+
 export interface DiscoveredCandidate {
   url: string;
   channel: WebsiteChannel;
+  origin: CandidateOrigin;
   /** Where the URL came from, for the evidence trail. */
   note: string;
+  /** Shown on the candidate's "declared" signal, when it has one. */
+  declaredBy?: string;
 }
 
 export interface ChannelOutcome {
@@ -62,6 +79,8 @@ export function providerFieldChannel(
       candidates.push({
         url: normalized,
         channel: 'provider_field',
+        origin: 'declared',
+        declaredBy: 'The discovery source records this domain as the business website.',
         note: 'Listed as the website on the business profile.',
       });
       detail = `The profile lists ${registrableDomain(normalized)} as the website.`;
@@ -155,6 +174,7 @@ export async function searchEngineChannel(
       candidates.push({
         url: normalized,
         channel: 'search_engine',
+        origin: 'found',
         note: `Search result for ${query} — "${result.title}".`,
       });
     }
@@ -227,33 +247,10 @@ export function domainGuessChannel(
     candidates: guesses.map((url) => ({
       url,
       channel: 'domain_guess' as const,
+      origin: 'derived' as const,
       note: 'Domain derived from the business name — checked, not assumed.',
     })),
     socialProfiles: [],
-    directoryListings: [],
-  };
-}
-
-/**
- * Channel 4 — social profiles.
- *
- * Social pages are not websites. They are recorded as context, and a profile
- * that the business itself nominates as its "website" is treated as an open
- * question rather than as proof either way.
- */
-export function socialProfileChannel(socialProfiles: string[]): ChannelOutcome {
-  return {
-    result: {
-      channel: 'social_profile',
-      status: 'ok',
-      detail:
-        socialProfiles.length > 0
-          ? `${socialProfiles.length} social profile(s) found. A social profile is not a website.`
-          : 'No social profiles found.',
-      candidatesFound: 0,
-    },
-    candidates: [],
-    socialProfiles,
     directoryListings: [],
   };
 }

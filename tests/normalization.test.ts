@@ -4,6 +4,12 @@ import { comparePhones, extractPhoneNumbers, normalizePhone } from '@/lib/normal
 import { addressKey, normalizeStreet, splitStreetLine } from '@/lib/normalize/address';
 import { distanceKm, isWithinRadius, boundingBox } from '@/lib/normalize/geo';
 import { domainNameOverlap, isSocialHost, isSocialOrDirectoryHost, looksParked, registrableDomain } from '@/lib/normalize/domain';
+import {
+  extractDomainsFromText,
+  handleDomainCandidates,
+  isLinkInBioHost,
+  parseSocialProfile,
+} from '@/lib/normalize/social';
 
 describe('text normalisation', () => {
   it('transliterates German characters consistently', () => {
@@ -126,5 +132,65 @@ describe('domain classification', () => {
   it('measures name overlap with a domain without treating it as proof', () => {
     expect(domainNameOverlap('kaiser-barber.de', 'Barbershop Kaiser')).toBeGreaterThan(0);
     expect(domainNameOverlap('autohaus-nord.de', 'Barbershop Kaiser')).toBe(0);
+  });
+});
+
+describe('social profile parsing', () => {
+  it('reads Facebook handles from the shapes Facebook uses', () => {
+    expect(parseSocialProfile('https://www.facebook.com/cutandshavegiessen')).toMatchObject({
+      platform: 'facebook',
+      handle: 'cutandshavegiessen',
+    });
+    expect(parseSocialProfile('https://m.facebook.com/rasierklinge.giessen/')).toMatchObject({
+      platform: 'facebook',
+      handle: 'rasierklinge.giessen',
+    });
+    expect(parseSocialProfile('https://fb.com/SomeShop')).toMatchObject({ handle: 'someshop' });
+  });
+
+  it('reads Instagram handles, including the @ form', () => {
+    expect(parseSocialProfile('https://www.instagram.com/nagelbarlisa')).toMatchObject({
+      platform: 'instagram',
+      handle: 'nagelbarlisa',
+    });
+    expect(parseSocialProfile('https://instagram.com/@studiofoenix')).toMatchObject({ handle: 'studiofoenix' });
+  });
+
+  it('does not mistake a post or a numeric id for a handle', () => {
+    expect(parseSocialProfile('https://www.instagram.com/p/Cabc123/')?.handle).toBeNull();
+    expect(parseSocialProfile('https://www.facebook.com/profile.php?id=123456')?.handle).toBeNull();
+    expect(parseSocialProfile('https://www.facebook.com/123456789')?.handle).toBeNull();
+  });
+
+  it('returns null for anything that is not a social profile', () => {
+    expect(parseSocialProfile('https://barbier-seltersweg.de')).toBeNull();
+    expect(parseSocialProfile('not a url')).toBeNull();
+  });
+
+  it('derives domain candidates from a handle', () => {
+    const candidates = handleDomainCandidates('rasierklinge.giessen');
+    expect(candidates).toContain('https://rasierklingegiessen.de');
+    expect(candidates).toContain('https://rasierklinge-giessen.de');
+    expect(candidates.every((c) => c.startsWith('https://'))).toBe(true);
+  });
+
+  it('refuses to derive anything from a handle that is too short', () => {
+    expect(handleDomainCandidates('ab')).toEqual([]);
+  });
+
+  it('recognises link-in-bio hosts, which are meant to be followed', () => {
+    expect(isLinkInBioHost('https://linktr.ee/somebody')).toBe(true);
+    expect(isLinkInBioHost('https://beacons.ai/somebody')).toBe(true);
+    expect(isLinkInBioHost('https://www.facebook.com/somebody')).toBe(false);
+    expect(isLinkInBioHost('https://barbier-seltersweg.de')).toBe(false);
+  });
+
+  it('pulls domains out of a search result snippet', () => {
+    const domains = extractDomainsFromText('Cut & Shave Gießen · Website: www.cutandshave-giessen.de · Ludwigsplatz 3');
+    expect(domains).toContain('cutandshave-giessen.de');
+  });
+
+  it('does not mistake a file name for a domain', () => {
+    expect(extractDomainsFromText('See our menu at speisekarte.pdf')).toEqual([]);
   });
 });

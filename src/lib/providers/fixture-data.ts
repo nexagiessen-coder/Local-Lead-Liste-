@@ -71,6 +71,8 @@ export const FIXTURE_BUSINESSES: FixtureBusiness[] = [
     street: 'Ludwigsplatz', houseNumber: '3', postalCode: '35390', city: 'Gießen',
     lat: 50.5861, lon: 8.6731,
     phone: '+49 641 1234503',
+    // Nominates a Facebook page as its "website"; the real site is only
+    // reachable through the link page in its profile bio.
     website: 'https://www.facebook.com/cutandshavegiessen',
     socialUrls: ['https://www.instagram.com/cutandshavegiessen'],
     openingHoursRaw: 'Mo-Sa 10:00-19:00',
@@ -223,6 +225,44 @@ export const FIXTURE_BUSINESSES: FixtureBusiness[] = [
     openingHoursRaw: 'Mo-Fr 06:00-23:00; Sa-Su 09:00-20:00',
   },
   {
+    externalId: 'demo/18',
+    // Facebook page as its only web presence, and nothing behind it.
+    name: 'Rasierklinge Barbier',
+    category: 'barber',
+    categoryLabel: 'Barber',
+    street: 'Westanlage', houseNumber: '18', postalCode: '35390', city: 'Gießen',
+    lat: 50.5843, lon: 8.6701,
+    phone: '+49 641 1234518',
+    website: 'https://www.facebook.com/rasierklinge.giessen',
+    openingHoursRaw: 'Tu-Sa 09:00-18:00',
+  },
+  {
+    externalId: 'demo/19',
+    // Instagram handle that matches a domain owned by a different business.
+    name: 'Nagelbar Lisa',
+    category: 'beauty',
+    categoryLabel: 'Nail salon',
+    street: 'Sonnenstraße', houseNumber: '4', postalCode: '35398', city: 'Gießen',
+    lat: 50.5921, lon: 8.6635,
+    phone: '+49 641 1234519',
+    website: null,
+    socialUrls: ['https://www.instagram.com/nagelbarlisa'],
+    openingHoursRaw: 'Mo-Fr 10:00-19:00',
+  },
+  {
+    externalId: 'demo/20',
+    // Publishes a link page that cannot be read right now.
+    name: 'Studio Fönix',
+    category: 'barber',
+    categoryLabel: 'Hairdresser',
+    street: 'Alter Steinbacher Weg', houseNumber: '7', postalCode: '35394', city: 'Gießen',
+    lat: 50.5896, lon: 8.6952,
+    phone: '+49 641 1234520',
+    website: null,
+    socialUrls: ['https://www.instagram.com/studiofoenix'],
+    openingHoursRaw: 'Tu-Sa 10:00-18:00',
+  },
+  {
     externalId: 'demo/17',
     name: 'Bella Napoli',
     category: 'restaurant',
@@ -248,7 +288,10 @@ function page(title: string, body: string): string {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
 }
 
-/** The demo "web". Keys are hostnames without `www.`. */
+/**
+ * The demo "web". Keys are a hostname without `www.`, optionally followed by a
+ * path (`linktr.ee/somebody`) when several pages share a host.
+ */
 export const FIXTURE_PAGES: Record<string, FixturePage> = {
   'barbier-seltersweg.de': {
     status: 200,
@@ -308,6 +351,37 @@ export const FIXTURE_PAGES: Record<string, FixturePage> = {
     ),
   },
   'elektro-schmidt.de': { status: 0, fails: true },
+  'linktr.ee/cutandshavegiessen': {
+    status: 200,
+    html: page(
+      'Cut & Shave Gießen — alle Links',
+      `<h1>Cut &amp; Shave Gießen</h1>
+       <ul>
+         <li><a href="https://cutandshave-giessen.de">Website &amp; Termine</a></li>
+         <li><a href="https://www.instagram.com/cutandshavegiessen">Instagram</a></li>
+         <li><a href="https://www.facebook.com/cutandshavegiessen">Facebook</a></li>
+       </ul>`,
+    ),
+  },
+  'cutandshave-giessen.de': {
+    status: 200,
+    html: page(
+      'Cut & Shave Gießen — Barbershop am Ludwigsplatz',
+      `<h1>Cut &amp; Shave Gießen</h1>
+       <address>Ludwigsplatz 3, 35390 Gießen</address>
+       <p>Termine: <a href="tel:+496411234503">0641 1234503</a></p>`,
+    ),
+  },
+  'nagelbarlisa.de': {
+    status: 200,
+    html: page(
+      'Nagelbar Lisa — Hamburg',
+      `<h1>Nagelbar Lisa</h1>
+       <address>Eppendorfer Weg 220, 20251 Hamburg</address>
+       <p>Telefon: 040 1234567</p>`,
+    ),
+  },
+  'linktr.ee/studiofoenix': { status: 0, fails: true },
   'fitnesspoint-ffm.de': {
     status: 200,
     html: page(
@@ -406,6 +480,36 @@ export const FIXTURE_SEARCH_DOCS: FixtureSearchDoc[] = [
     title: 'Fitness Point Frankfurt',
     snippet: 'Hanauer Landstraße 5, 60314 Frankfurt.',
     keywords: ['fitness', 'point', 'frankfurt', '1234516'],
+  },
+  {
+    url: 'https://linktr.ee/cutandshavegiessen',
+    title: 'Cut & Shave Gießen — alle Links',
+    snippet: 'Termine, Instagram und Facebook an einem Ort.',
+    keywords: ['cutandshavegiessen', 'giessen'],
+  },
+  {
+    url: 'https://www.facebook.com/rasierklinge.giessen',
+    title: 'Rasierklinge Barbier | Facebook',
+    snippet: 'Westanlage 18, Gießen. Barbershop.',
+    keywords: ['rasierklinge', 'giessen', '1234518'],
+  },
+  {
+    url: 'https://www.gelbeseiten.de/gsbiz/rasierklinge-barbier-giessen',
+    title: 'Rasierklinge Barbier, Gießen | Gelbe Seiten',
+    snippet: 'Westanlage 18, 35390 Gießen — Friseure',
+    keywords: ['rasierklinge', 'giessen', 'barbier'],
+  },
+  {
+    url: 'https://www.instagram.com/nagelbarlisa',
+    title: 'Nagelbar Lisa (@nagelbarlisa) • Instagram',
+    snippet: 'Sonnenstraße 4, Gießen.',
+    keywords: ['nagelbarlisa', 'giessen', 'nagelbar', 'lisa'],
+  },
+  {
+    url: 'https://linktr.ee/studiofoenix',
+    title: 'Studio Fönix — Links',
+    snippet: 'Alle Links von Studio Fönix.',
+    keywords: ['studiofoenix', 'giessen'],
   },
   {
     url: 'https://www.11880.com/branchenbuch/giessen/nagelstudio-lotus',

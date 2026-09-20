@@ -96,6 +96,15 @@ try {
     `no-website=${noWebsiteBadges} manual=${manualBadges} verified=${hasWebsiteBadges}`,
   );
 
+  // A Facebook-only business resolved through its link page to a real site.
+  const cutAndShave = page.locator('tbody tr', { hasText: 'Cut & Shave' });
+  const cutAndShaveStatus = (await cutAndShave.innerText()).replace(/\s+/g, ' ');
+  log(
+    cutAndShaveStatus.includes('Verified website'),
+    'Facebook-only business resolved to its real website automatically',
+    cutAndShaveStatus.slice(0, 90),
+  );
+
   // Both Friseur Müller branches survive as separate rows.
   const muellerRows = await page.locator('tbody tr', { hasText: 'Friseur Müller' }).count();
   log(muellerRows === 2, 'Two same-name branches are kept separate', `${muellerRows} rows`);

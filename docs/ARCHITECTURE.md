@@ -121,8 +121,12 @@ can never produce `VERIFIED_NO_WEBSITE`).
    `"name" city`, `"name" street city`, `"name" phone`.
 3. `domain_guess` — deterministic domain candidates from the business name and
    city across configured TLDs, only accepted after full page-level matching.
-4. `social_profile` — social profiles found by search that link out to an
-   official domain.
+4. `social_profile` — **active resolution** of Facebook and Instagram profiles:
+   the handle becomes domain candidates, the handle is searched (which surfaces
+   the "Website" field search engines index from the page), and any link-in-bio
+   page the business publishes is followed. The platforms themselves are never
+   fetched — their terms forbid it and their login walls would make "no website"
+   indistinguishable from "blocked".
 5. `directory` — directory entries (only via permitted APIs) that expose a
    website field.
 
@@ -137,6 +141,7 @@ final URL recorded) and scored on independent signals:
 | Business name match (normalised token overlap) | 20 | Weak alone — legal-form and generic tokens stripped. |
 | schema.org LocalBusiness match | 15 | Structured confirmation. |
 | Domain contains name tokens | 8 | Supporting only; never sufficient. |
+| Declared by the business (profile website field or its own link page) | 20 | Strong signal. |
 | **Conflicting phone on page** | −40 | Different business. |
 | **Conflicting postal code/city** | −25 | Different branch or business. |
 | Parked / for-sale / placeholder page | reject | Not a website. |
@@ -151,7 +156,7 @@ A candidate is `ACCEPTED` at ≥ 70 with at least one *strong* signal
 | `VERIFIED_WEBSITE` | ≥1 accepted candidate. |
 | `PROBABLE_WEBSITE` | ≥1 probable candidate, none accepted. |
 | `WEBSITE_UNCERTAIN` | candidates exist but all weak/conflicting. |
-| `VERIFIED_NO_WEBSITE` | identity `CONFIRMED` **and** every channel `ok` **and** provider field empty **and** no candidate ≥ probable threshold **and** ≥ `MIN_CHANNELS_FOR_NO_WEBSITE` channels ran. |
+| `VERIFIED_NO_WEBSITE` | identity `CONFIRMED` **and** every channel `ok` (including social resolution) **and** no candidate ≥ probable threshold **and** ≥ `MIN_CHANNELS_FOR_NO_WEBSITE` channels ran **and** confidence ≥ 70. |
 | `REQUIRES_MANUAL_CHECK` | any channel not `ok`, identity not confirmed, or evidence conflicts. |
 
 Only `VERIFIED_NO_WEBSITE` qualifies for the "no website" prospecting list.

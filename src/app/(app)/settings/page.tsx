@@ -57,12 +57,16 @@ export default async function SettingsPage() {
         <dl className="divide-y divide-line text-sm">
           <Threshold
             label="Candidate accepted as this business's website"
-            value={`score ≥ ${ACCEPT_THRESHOLD} with a strong signal (phone, address or profile-declared)`}
+            value={`score ≥ ${ACCEPT_THRESHOLD} with a strong signal (matching phone, matching address, or a link the business published itself)`}
           />
           <Threshold label="Candidate treated as probable" value={`score ≥ ${PROBABLE_THRESHOLD}`} />
           <Threshold
             label="Channels required before “verified no website”"
             value={`${publicConfig.minChannelsForNoWebsite} completed channels, with none failing or unavailable`}
+          />
+          <Threshold
+            label="Social profiles (Facebook, Instagram)"
+            value="Resolved automatically: handle → domain candidates, handle searched, link-in-bio followed. The platforms themselves are never fetched."
           />
           <Threshold label="Identity confidence required to qualify" value={`${MIN_IDENTITY_CONFIDENCE}/100 and status “confirmed”`} />
           <Threshold label="Website confidence required to qualify" value={`${MIN_WEBSITE_CONFIDENCE}/100`} />
