@@ -71,10 +71,15 @@ export default async function ResearchPage() {
                                 ? 'warn'
                                 : 'info'
                         }
-                        title={run.error ?? undefined}
                       >
                         {run.status}
                       </Badge>
+                      {/* Shown, not hidden in a tooltip: this is the one place
+                          that explains why a run returned little or nothing,
+                          and a tooltip is unreachable on a touch screen. */}
+                      {run.error && (
+                        <p className="mt-1 max-w-[42ch] text-xs text-bad">{run.error}</p>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">{run.stats?.newBusinesses ?? 0}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{run.stats?.verified ?? 0}</td>
