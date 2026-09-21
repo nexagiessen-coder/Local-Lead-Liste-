@@ -24,10 +24,16 @@ export type GeocodingProviderId = 'nominatim' | 'google' | 'fixture';
 export type WebSearchProviderId = 'brave' | 'google-cse' | 'none';
 export type PhotoProviderId = 'google-places' | 'none';
 
+/**
+ * Case-insensitive: a hosting panel's UI or a phone's keyboard autocapitalizing
+ * `overpass` to `Overpass` is a common, easy-to-miss mistake, and there's no
+ * reason a provider id should be case-sensitive — every `allowed` value here is
+ * already lowercase, so matching case-insensitively can never pick the wrong one.
+ */
 function oneOf<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
-  const raw = str(key);
-  if (raw && (allowed as readonly string[]).includes(raw)) return raw as T;
-  return fallback;
+  const raw = str(key)?.toLowerCase();
+  const match = raw ? (allowed as readonly string[]).find((a) => a === raw) : undefined;
+  return (match as T | undefined) ?? fallback;
 }
 
 /**
