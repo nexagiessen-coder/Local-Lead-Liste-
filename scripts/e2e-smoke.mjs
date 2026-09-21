@@ -183,15 +183,18 @@ try {
     businessName,
   );
 
-  // Record an outcome.
-  await page.selectOption('#outcome', 'no_answer');
-  await page.selectOption('#lead-status-after', 'no_answer');
-  await page.fill('#call-note', 'Nobody picked up, trying again tomorrow.');
-  await clickAndWait('button:has-text("Save call outcome")');
+  // Record an outcome with a single click: the button is the whole
+  // interaction, and it must also move the lead to the matching status
+  // without the caller choosing it separately.
+  await clickAndWait('button[name="outcome"][value="no_answer"]');
   await page.reload({ waitUntil: 'networkidle' });
   log(
     await page.locator('li:has-text("Alex Tester") span:text-is("no answer")').first().isVisible(),
-    'Call outcome is recorded in the call history',
+    'One click records the call outcome in the call history',
+  );
+  log(
+    await page.locator('#lead-status').inputValue() === 'no_answer',
+    'The outcome sets the matching lead status by itself',
   );
 
   await page.screenshot({ path: '/tmp/claude-0/e2e/call.png', fullPage: false });
@@ -209,7 +212,34 @@ try {
   log(await page.locator('text=seats in use').isVisible(), 'Settings shows team seat usage');
   await page.screenshot({ path: '/tmp/claude-0/e2e/settings.png', fullPage: false });
 
-  // --- 12. Auth guard ------------------------------------------------------
+  // --- 12. Mobile ----------------------------------------------------------
+  // Calling happens on a phone, so the number and the call control have to be
+  // reachable there — not pushed off the side of a table that scrolls
+  // sideways, which is what a desktop-only layout does to them.
+  const phone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    storageState: await context.storageState(),
+  });
+  const phonePage = await phone.newPage();
+  await phonePage.goto(`${BASE}/pool`, { waitUntil: 'networkidle' });
+
+  const phoneLink = phonePage.locator('a[href^="tel:"]').first();
+  const phoneVisible = await phoneLink.isVisible().catch(() => false);
+  log(phoneVisible, 'Phone numbers are visible and dialable on a phone-sized screen');
+
+  if (phoneVisible) {
+    const box = await phoneLink.boundingBox();
+    const withinViewport = box !== null && box.x >= 0 && box.x + box.width <= 390;
+    log(withinViewport, 'The phone number is inside the viewport, not cut off', box ? `x=${Math.round(box.x)} w=${Math.round(box.width)}` : 'no box');
+    log((box?.height ?? 0) >= 32, 'The phone number is a usable tap target', `${Math.round(box?.height ?? 0)}px tall`);
+  }
+
+  await phonePage.screenshot({ path: '/tmp/claude-0/e2e/mobile-pool.png', fullPage: false });
+  await phone.close();
+
+  // --- 13. Auth guard ------------------------------------------------------
   const anon = await browser.newContext();
   const anonPage = await anon.newPage();
   await anonPage.goto(`${BASE}/leads`, { waitUntil: 'networkidle' });

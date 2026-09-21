@@ -11,7 +11,8 @@ import {
   type ActionResult,
 } from '@/app/actions/leads';
 import type { LeadStatusDefinition } from '@/lib/types';
-import { Alert, FieldLabel, buttonPrimary, buttonSecondary, inputClass } from './ui';
+import { CALL_OUTCOMES } from '@/lib/calls/outcomes';
+import { Alert, FieldLabel, buttonSecondary, inputClass } from './ui';
 
 const INITIAL: ActionResult = { ok: false, error: null };
 
@@ -108,17 +109,15 @@ export function NoteForm({ businessId }: { businessId: string }) {
   );
 }
 
-const CALL_OUTCOMES = [
-  { value: 'no_answer', label: 'No answer', status: 'no_answer' },
-  { value: 'reached', label: 'Reached someone', status: 'called' },
-  { value: 'callback', label: 'Call back later', status: 'callback' },
-  { value: 'interested', label: 'Interested', status: 'interested' },
-  { value: 'not_interested', label: 'Not interested', status: 'not_interested' },
-  { value: 'wrong_number', label: 'Wrong number', status: 'wrong_number' },
-  { value: 'has_website', label: 'Already has a website', status: 'already_has_site' },
-  { value: 'do_not_contact', label: 'Do not contact again', status: 'do_not_contact' },
-];
-
+/**
+ * Records what happened on a call.
+ *
+ * The outcome buttons are the whole interface: one tap records the attempt and
+ * moves the lead to the status that outcome implies, because that is the step
+ * a caller repeats dozens of times in a row. A note, a callback time or an
+ * unusual status are the exception, so they sit in an optional section that
+ * stays out of the way until it is wanted.
+ */
 export function CallOutcomeForm({
   callId,
   leadId,
@@ -133,45 +132,57 @@ export function CallOutcomeForm({
     <form action={action} className="space-y-3">
       <input type="hidden" name="callId" value={callId} />
       <input type="hidden" name="leadId" value={leadId} />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <FieldLabel htmlFor="outcome">Outcome</FieldLabel>
-          <select id="outcome" name="outcome" className={inputClass} required defaultValue="">
-            <option value="" disabled>
-              Choose an outcome
-            </option>
-            {CALL_OUTCOMES.map((outcome) => (
-              <option key={outcome.value} value={outcome.value}>
-                {outcome.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <FieldLabel htmlFor="lead-status-after">Set lead status to</FieldLabel>
-          <select id="lead-status-after" name="leadStatus" className={inputClass} defaultValue="">
-            <option value="">Leave unchanged</option>
-            {statuses.map((status) => (
-              <option key={status.key} value={status.key}>
-                {status.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <FieldLabel htmlFor="callbackAt">Callback date (optional)</FieldLabel>
-          <input id="callbackAt" name="callbackAt" type="datetime-local" className={inputClass} />
-        </div>
-        <div>
-          <FieldLabel htmlFor="durationSeconds">Duration in seconds (optional)</FieldLabel>
-          <input id="durationSeconds" name="durationSeconds" type="number" min={0} max={36000} className={inputClass} />
-        </div>
+
+      <div className="flex flex-wrap gap-2">
+        {CALL_OUTCOMES.map((outcome) => (
+          <button
+            key={outcome.value}
+            type="submit"
+            name="outcome"
+            value={outcome.value}
+            className="inline-flex min-h-[2.5rem] items-center rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:border-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            {outcome.label}
+          </button>
+        ))}
       </div>
-      <div>
-        <FieldLabel htmlFor="call-note">Note</FieldLabel>
-        <textarea id="call-note" name="note" rows={2} className={inputClass} maxLength={2000} />
-      </div>
-      <Submit label="Save call outcome" className={buttonPrimary} />
+
+      <details className="rounded-md border border-line px-3 py-2">
+        <summary className="cursor-pointer text-xs text-ink-soft">
+          Add a note, callback time or a different status
+        </summary>
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <FieldLabel htmlFor="lead-status-after">Set lead status to</FieldLabel>
+              <select id="lead-status-after" name="leadStatus" className={inputClass} defaultValue="">
+                <option value="">Match the outcome</option>
+                {statuses.map((status) => (
+                  <option key={status.key} value={status.key}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <FieldLabel htmlFor="callbackAt">Callback date</FieldLabel>
+              <input id="callbackAt" name="callbackAt" type="datetime-local" className={inputClass} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="durationSeconds">Duration in seconds</FieldLabel>
+              <input id="durationSeconds" name="durationSeconds" type="number" min={0} max={36000} className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <FieldLabel htmlFor="call-note">Note</FieldLabel>
+            <textarea id="call-note" name="note" rows={2} className={inputClass} maxLength={2000} />
+          </div>
+          <p className="text-xs text-ink-muted">
+            These apply to whichever outcome button you press above.
+          </p>
+        </div>
+      </details>
+
       <Feedback state={state} />
     </form>
   );

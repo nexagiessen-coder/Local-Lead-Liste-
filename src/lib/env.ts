@@ -82,6 +82,18 @@ export const env = {
     return n > 0 ? n : null;
   })(),
 
+  /**
+   * Minimum gap between outbound calls to each rate-limited service. The
+   * defaults match the published limits: Brave's free tier allows one query
+   * per second and Nominatim's usage policy asks the same, while the shared
+   * public Overpass endpoint needs a wider margin. Calling faster than this
+   * gets requests rejected, and a channel that could not run blocks any
+   * "no website" conclusion — so pacing is what makes results possible.
+   */
+  webSearchMinIntervalMs: Math.max(0, int('WEB_SEARCH_MIN_INTERVAL_MS', 1100)),
+  geocodingMinIntervalMs: Math.max(0, int('GEOCODING_MIN_INTERVAL_MS', 1100)),
+  discoveryMinIntervalMs: Math.max(0, int('DISCOVERY_MIN_INTERVAL_MS', 2000)),
+
   overpassEndpoint: str('OVERPASS_ENDPOINT', 'https://overpass-api.de/api/interpreter')!,
   nominatimEndpoint: str('NOMINATIM_ENDPOINT', 'https://nominatim.openstreetmap.org')!,
   osmUserAgent: str('OSM_USER_AGENT', 'LocalLeadList/0.1 (self-hosted)')!,

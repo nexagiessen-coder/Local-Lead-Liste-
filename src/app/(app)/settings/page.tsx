@@ -22,9 +22,10 @@ export default async function SettingsPage() {
     listLeadStatuses(),
   ]);
   const providers = describeProviders();
-  const searchUsage = publicConfig.webSearchMonthlyLimit
-    ? await currentMonthlyUsage(publicConfig.webSearchProvider)
-    : null;
+  // Shown whenever a billable search provider is configured, with or without a
+  // cap: knowing how much of a paid quota a run consumed matters either way.
+  const billableSearch = publicConfig.webSearchProvider !== 'none';
+  const searchUsage = billableSearch ? await currentMonthlyUsage(publicConfig.webSearchProvider) : null;
 
   return (
     <div className="space-y-6">
@@ -77,10 +78,14 @@ export default async function SettingsPage() {
           <Threshold label="Identity confidence required to qualify" value={`${MIN_IDENTITY_CONFIDENCE}/100 and status “confirmed”`} />
           <Threshold label="Website confidence required to qualify" value={`${MIN_WEBSITE_CONFIDENCE}/100`} />
           <Threshold label="Verification considered stale after" value={`${publicConfig.verificationTtlDays} days`} />
-          {publicConfig.webSearchMonthlyLimit && (
+          {billableSearch && (
             <Threshold
               label="Search calls this month"
-              value={`${searchUsage ?? 0} / ${publicConfig.webSearchMonthlyLimit} — search channel stops (goes to manual check) once reached`}
+              value={
+                publicConfig.webSearchMonthlyLimit
+                  ? `${searchUsage ?? 0} of ${publicConfig.webSearchMonthlyLimit} used — searching stops automatically at the limit, and businesses go to manual check instead`
+                  : `${searchUsage ?? 0} used — no monthly limit set (set WEB_SEARCH_MONTHLY_LIMIT to cap spending)`
+              }
             />
           )}
           <Threshold label="Default country / timezone" value={`${publicConfig.defaultCountry} · ${publicConfig.defaultTimezone}`} />

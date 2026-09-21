@@ -19,6 +19,7 @@ import {
 } from '@/lib/repo/leads';
 import { addNote } from '@/lib/repo/notes';
 import { recordCallOutcome } from '@/lib/repo/calls';
+import { defaultStatusForOutcome } from '@/lib/calls/outcomes';
 import { persistVerification } from '@/lib/repo/verifications';
 import { buildIdentity } from '@/lib/identity/identity';
 import { verifyWebsite } from '@/lib/website/verify';
@@ -354,9 +355,13 @@ export async function recordCallOutcomeAction(_prev: ActionResult, formData: For
       callbackAt,
       durationSeconds: Number.isFinite(duration) ? duration : null,
     });
-    if (parsed.data.leadStatus) {
+    // Recording "not interested" already says what the lead's status is, so a
+    // one-click outcome applies the matching status by itself. An explicitly
+    // chosen status still wins, for the cases the obvious mapping gets wrong.
+    const status = parsed.data.leadStatus || defaultStatusForOutcome(parsed.data.outcome);
+    if (status) {
       const leadId = String(formData.get('leadId') ?? '');
-      if (leadId) await updateLeadStatus(leadId, parsed.data.leadStatus, user.id, parsed.data.note?.trim() || null);
+      if (leadId) await updateLeadStatus(leadId, status, user.id, parsed.data.note?.trim() || null);
     }
     await recordAudit({ userId: user.id, action: 'call.outcome', entityType: 'call', entityId: parsed.data.callId, detail: { outcome: parsed.data.outcome } });
     refresh();

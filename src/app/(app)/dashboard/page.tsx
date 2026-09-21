@@ -6,8 +6,11 @@ import { callsSince, teamActivity } from '@/lib/repo/calls';
 import { recentActivity } from '@/lib/repo/audit';
 import { listRuns } from '@/lib/repo/research';
 import { describeProviders } from '@/lib/providers/registry';
+import { currentMonthlyUsage } from '@/lib/repo/provider-usage';
+import { publicConfig } from '@/lib/env';
 import { DAY } from '@/lib/time';
-import { formatPhone, formatRelative } from '@/lib/format';
+import { formatRelative } from '@/lib/format';
+import { PhoneLink } from '@/components/phone-link';
 import { Alert, Card, EmptyState, Stat, buttonSecondary } from '@/components/ui';
 import { LeadStatusBadge } from '@/components/status';
 
@@ -28,23 +31,39 @@ export default async function DashboardPage() {
   ]);
   const providers = describeProviders();
 
+  const searchUsage =
+    publicConfig.webSearchProvider === 'none'
+      ? null
+      : {
+          used: await currentMonthlyUsage(publicConfig.webSearchProvider),
+          limit: publicConfig.webSearchMonthlyLimit,
+        };
+
+  const nextStep =
+    queue.length > 0
+      ? `${queue.length} lead${queue.length === 1 ? ' is' : 's are'} waiting in your calling queue.`
+      : counts.qualified > 0
+        ? `${counts.qualified} qualified prospect${counts.qualified === 1 ? ' is' : 's are'} ready to promote into your lead list.`
+        : 'Nothing is waiting. Start by finding new leads.';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-ink">Good to see you, {user.name.split(' ')[0]}</h1>
-          <p className="mt-1 text-sm text-ink-soft">
-            {queue.length > 0
-              ? `${queue.length} lead${queue.length === 1 ? ' is' : 's are'} waiting in your calling queue.`
-              : 'Your calling queue is empty. Research or promote some businesses to get started.'}
-          </p>
+          <p className="mt-1 text-sm text-ink-soft">{nextStep}</p>
         </div>
+        {/* The bigger button is whichever action actually moves work forward
+            right now: calling when leads are waiting, finding leads when not. */}
         <div className="flex gap-2">
-          <Link href="/research" className={buttonSecondary}>
-            New research
+          <Link href={queue.length > 0 ? '/research' : '/call'} className={buttonSecondary}>
+            {queue.length > 0 ? 'Find new leads' : 'Call queue'}
           </Link>
-          <Link href="/call" className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink">
-            Start calling
+          <Link
+            href={queue.length > 0 ? '/call' : '/research'}
+            className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-ink"
+          >
+            {queue.length > 0 ? `Start calling (${queue.length})` : 'Find new leads'}
           </Link>
         </div>
       </div>
@@ -56,16 +75,30 @@ export default async function DashboardPage() {
         </Alert>
       )}
 
-      <section aria-label="Overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Businesses researched" value={counts.researched} hint="In the research pool" />
-        <Stat label="Qualified prospects" value={counts.qualified} tone="good" hint="Verified no website, callable" />
-        <Stat label="Active leads" value={counts.leads} hint={`${counts.callable} ready to call`} />
-        <Stat label="Needs manual check" value={counts.manualCheck} tone="warn" hint="Uncertain or incomplete research" />
-        <Stat label="Calls in the last 24h" value={callsToday} />
-        <Stat label="Callbacks scheduled" value={counts.callbacks} tone="info" />
+      {/* Five numbers, each answering "is there something for me to do?".
+          Totals that only describe the database live on the pool and lead
+          pages, where acting on them is one click away. */}
+      <section aria-label="Overview" className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+        <Stat label="Ready to call" value={counts.callable} tone="good" hint="Assigned and not yet closed" />
+        <Stat label="Called today" value={callsToday} />
+        <Stat label="Callbacks due" value={counts.callbacks} tone="info" />
         <Stat label="Interested" value={counts.interested} tone="good" />
-        <Stat label="Converted" value={counts.converted} tone="good" />
+        <Stat label="Needs a check" value={counts.manualCheck} tone="warn" hint="Research was inconclusive" />
       </section>
+
+      <p className="text-xs text-ink-soft">
+        <Link href="/pool?qualified=1" className="font-medium text-ink underline underline-offset-2">
+          {counts.qualified} qualified prospect{counts.qualified === 1 ? '' : 's'}
+        </Link>{' '}
+        waiting in the research pool · {counts.researched} businesses researched in total
+        {searchUsage !== null && (
+          <>
+            {' · '}
+            {searchUsage.used} search{searchUsage.used === 1 ? '' : 'es'} used this month
+            {searchUsage.limit ? ` of ${searchUsage.limit}` : ''}
+          </>
+        )}
+      </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card
@@ -93,7 +126,7 @@ export default async function DashboardPage() {
                     {row.business.name}
                   </Link>
                   <span className="text-xs text-ink-soft">{row.business.city}</span>
-                  <span className="font-mono text-xs text-ink-soft">{formatPhone(row.business.phoneE164)}</span>
+                  <PhoneLink phoneE164={row.business.phoneE164} />
                   {row.lead && <LeadStatusBadge status={row.lead.status} statuses={statuses} />}
                 </li>
               ))}

@@ -1,5 +1,6 @@
-import type { GeocodeResult, GeocodingProvider, ProviderInfo } from '../types';
+import type { GeocodeResult, GeocodingProvider, ProviderInfo, ReverseGeocodeResult } from '../types';
 import { normalizeText } from '@/lib/normalize/text';
+import { distanceKm } from '@/lib/normalize/geo';
 
 /**
  * Offline geocoder over a small list of German cities.
@@ -37,6 +38,33 @@ export class FixtureGeocodingProvider implements GeocodingProvider {
       }
     }
     return null;
+  }
+
+  /**
+   * Resolves only the city/postcode of the nearest known demo city, and never
+   * a street: the offline dataset has no street-level data, and inventing one
+   * would be exactly the kind of fabricated detail this product forbids.
+   */
+  async reverse(lat: number, lon: number): Promise<ReverseGeocodeResult | null> {
+    let nearest: (typeof CITIES)[number] | null = null;
+    let nearestKm = Number.POSITIVE_INFINITY;
+    for (const city of CITIES) {
+      const km = distanceKm({ lat, lon }, { lat: city.lat, lon: city.lon });
+      if (km < nearestKm) {
+        nearest = city;
+        nearestKm = km;
+      }
+    }
+    if (!nearest || nearestKm > 25) return null;
+
+    return {
+      street: null,
+      houseNumber: null,
+      postalCode: nearest.postalCode,
+      city: nearest.city,
+      region: nearest.region,
+      countryCode: nearest.countryCode,
+    };
   }
 }
 

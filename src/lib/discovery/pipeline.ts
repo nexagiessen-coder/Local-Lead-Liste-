@@ -1,6 +1,7 @@
 import { getDb, one, type Db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { buildIdentity } from '@/lib/identity/identity';
+import { enrichCandidateAddress } from '@/lib/identity/enrich';
 import { matchExistingBusiness } from '@/lib/identity/dedupe';
 import {
   countSources,
@@ -143,8 +144,20 @@ export async function runResearch(
   const newBusinessIds: string[] = [];
   const touchedBusinessIds: string[] = [];
 
-  for (const raw of discovered) {
-    const identity = buildIdentity(raw, { defaultCountry: env.defaultCountry });
+  for (const rawDiscovered of discovered) {
+    // A record with a phone and coordinates but no address is a callable lead
+    // that would otherwise score too low to ever be confirmed. Reading the
+    // address back from its coordinates adds a real fact; it is scored as a
+    // partial address, never as one the business itself asserted.
+    const { candidate: raw, addressFromReverseGeocode } = await enrichCandidateAddress(
+      rawDiscovered,
+      providers.geocoding,
+      db,
+    );
+    const identity = buildIdentity(raw, {
+      defaultCountry: env.defaultCountry,
+      addressFromReverseGeocode,
+    });
 
     if (!identity.name) {
       stats.excluded += 1;

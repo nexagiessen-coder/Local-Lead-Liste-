@@ -55,6 +55,14 @@ export interface BuildIdentityOptions {
   corroboratingSources?: number;
   /** Set when sources disagree on a strong field — forces NEEDS_REVIEW. */
   conflicts?: string[];
+  /**
+   * True when the address was read back from coordinates rather than asserted
+   * by the business record itself. Such an address is real and useful, but it
+   * describes the premises the map places the business at, so it is always
+   * scored as a partial address — never as the strong "complete street
+   * address" signal, which only the source's own claim earns.
+   */
+  addressFromReverseGeocode?: boolean;
 }
 
 export function buildIdentity(
@@ -70,8 +78,13 @@ export function buildIdentity(
   const city = cleanString(raw.city);
   const countryCode = cleanString(raw.countryCode)?.toUpperCase() ?? defaultCountry;
 
-  const hasFullAddress = Boolean(street && houseNumber && postalCode && city);
-  const hasPartialAddress = !hasFullAddress && Boolean(street && (city || postalCode));
+  const fromReverseGeocode = options.addressFromReverseGeocode === true;
+  const hasCompleteAddress = Boolean(street && houseNumber && postalCode && city);
+  // A map-derived address never earns the strong signal, however complete it
+  // looks: the business record itself never claimed it.
+  const hasFullAddress = hasCompleteAddress && !fromReverseGeocode;
+  const hasPartialAddress =
+    !hasFullAddress && Boolean((street && (city || postalCode)) || (fromReverseGeocode && (city || postalCode)));
   const hasCoordinates = typeof raw.lat === 'number' && typeof raw.lon === 'number';
   const nameTokens = distinctiveTokens(name);
 
@@ -99,7 +112,11 @@ export function buildIdentity(
     },
     {
       key: 'address',
-      label: hasFullAddress ? 'Complete street address' : 'Partial address',
+      label: fromReverseGeocode
+        ? 'Address (read from map coordinates)'
+        : hasFullAddress
+          ? 'Complete street address'
+          : 'Partial address',
       value: [street, houseNumber, postalCode, city].filter(Boolean).join(' ') || null,
       strength: hasFullAddress ? 'strong' : 'medium',
       present: hasFullAddress || hasPartialAddress,

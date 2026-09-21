@@ -10,14 +10,45 @@ const STANCE_LABEL = { supports: 'Supports', contradicts: 'Conflicts', neutral: 
  * Shows concrete, checkable facts and their sources — what was searched, what
  * was found, what was rejected and why. It never shows model reasoning.
  */
+/**
+ * The evidence trail.
+ *
+ * What is shown by default is the evidence that actually decided the outcome —
+ * the items that support or contradict it. The neutral context (each channel's
+ * status, each rejected candidate) is already presented above this list in its
+ * own section, so repeating all of it inline buried the two or three lines
+ * that matter. It stays one click away, because the whole promise of this
+ * product is that a person can check the reasoning by hand.
+ */
 export function EvidenceList({ evidence }: { evidence: EvidenceItem[] }) {
   if (evidence.length === 0) {
     return <p className="px-4 py-3 text-sm text-ink-soft">No verification has been run for this business yet.</p>;
   }
 
+  const decisive = evidence.filter((item) => item.stance !== 'neutral');
+  const context = evidence.filter((item) => item.stance === 'neutral');
+
+  return (
+    <>
+      <Items items={decisive.length > 0 ? decisive : evidence} />
+      {decisive.length > 0 && context.length > 0 && (
+        <details className="border-t border-line px-4 py-2">
+          <summary className="cursor-pointer text-xs text-ink-soft">
+            Show the full trail ({context.length} more step{context.length === 1 ? '' : 's'} already summarised above)
+          </summary>
+          <div className="-mx-4 mt-2">
+            <Items items={context} />
+          </div>
+        </details>
+      )}
+    </>
+  );
+}
+
+function Items({ items }: { items: EvidenceItem[] }) {
   return (
     <ul className="divide-y divide-line">
-      {evidence.map((item, index) => (
+      {items.map((item, index) => (
         <li key={item.id ?? `${item.kind}-${index}`} className="px-4 py-2.5">
           <div className="flex flex-wrap items-start gap-2">
             <Badge tone={STANCE_TONE[item.stance]}>{STANCE_LABEL[item.stance]}</Badge>

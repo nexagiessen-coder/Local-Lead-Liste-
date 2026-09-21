@@ -2,6 +2,7 @@ import { env } from '@/lib/env';
 import { getCategory, CATEGORIES } from '@/lib/discovery/categories';
 import { parseOpeningHours } from '@/lib/hours/parse';
 import { cleanString } from '@/lib/normalize/text';
+import { createThrottle, parseRetryAfter, withRetry } from '../throttle';
 import {
   ProviderError,
   type DiscoveryProvider,
@@ -9,6 +10,13 @@ import {
   type ProviderInfo,
   type RawBusinessCandidate,
 } from '../types';
+
+/**
+ * The public Overpass endpoint is shared infrastructure that rejects bursts
+ * with 429/504. Queries here are large but rare, so a wide gap plus retries
+ * is both polite and far more reliable than failing the whole run.
+ */
+const throttle = createThrottle(env.discoveryMinIntervalMs);
 
 interface OverpassElement {
   type: 'node' | 'way' | 'relation';
@@ -62,34 +70,11 @@ export class OverpassDiscoveryProvider implements DiscoveryProvider {
 
     const body = `[out:json][timeout:60];\n(\n${clauses}\n);\nout center tags ${fetchLimit};`;
 
-    let response: Response;
-    try {
-      response = await fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': env.osmUserAgent,
-          Accept: 'application/json',
-        },
-        body: new URLSearchParams({ data: body }).toString(),
-        signal: AbortSignal.timeout(90_000),
-      });
-    } catch (cause) {
-      throw new ProviderError('overpass', 'Overpass request failed.', { cause, retryable: true });
-    }
-
-    if (response.status === 429 || response.status === 504) {
-      throw new ProviderError('overpass', 'Overpass is rate limiting or overloaded. Try again shortly.', {
-        retryable: true,
-      });
-    }
-    if (!response.ok) {
-      throw new ProviderError('overpass', `Overpass returned HTTP ${response.status}.`, {
-        retryable: response.status >= 500,
-      });
-    }
-
-    const data = (await response.json()) as OverpassResponse;
+    const data = await withRetry(() => throttle(() => this.request(body)), {
+      attempts: 3,
+      baseDelayMs: 3000,
+      maxDelayMs: 20_000,
+    });
     const out: RawBusinessCandidate[] = [];
 
     for (const element of data.elements) {
@@ -132,6 +117,37 @@ export class OverpassDiscoveryProvider implements DiscoveryProvider {
     }
 
     return out;
+  }
+
+  private async request(body: string): Promise<OverpassResponse> {
+    let response: Response;
+    try {
+      response = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': env.osmUserAgent,
+          Accept: 'application/json',
+        },
+        body: new URLSearchParams({ data: body }).toString(),
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch (cause) {
+      throw new ProviderError('overpass', 'Overpass request failed.', { cause, retryable: true });
+    }
+
+    if (response.status === 429 || response.status === 504) {
+      throw new ProviderError('overpass', 'Overpass is rate limiting or overloaded. Try again shortly.', {
+        retryable: true,
+        retryAfterMs: parseRetryAfter(response.headers.get('retry-after')),
+      });
+    }
+    if (!response.ok) {
+      throw new ProviderError('overpass', `Overpass returned HTTP ${response.status}.`, {
+        retryable: response.status >= 500,
+      });
+    }
+    return (await response.json()) as OverpassResponse;
   }
 }
 

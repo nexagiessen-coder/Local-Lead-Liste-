@@ -227,35 +227,34 @@ export async function BusinessDetail({ business, user }: { business: Business; u
             />
           </Card>
 
-          <Card title="Photos" description="Real photos from the provider, shown only when they can be tied to this business.">
-            <div className="p-4">
-              {photos.photos.length > 0 ? (
-                <>
-                  <ul className="grid grid-cols-2 gap-2">
-                    {photos.photos.map((photo) => (
-                      <li key={photo.providerRef}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={photo.url}
-                          alt={`Photo of ${business.name} supplied by the business data provider`}
-                          className="h-28 w-full rounded-md border border-line object-cover"
-                          loading="lazy"
-                        />
-                        {photo.attribution && (
-                          <p className="mt-0.5 text-[10px] text-ink-muted">{photo.attribution}</p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-2 text-xs text-ink-muted">
-                    {photos.attribution} · Shown live from the provider and not stored. Photos are never generated.
-                  </p>
-                </>
-              ) : (
-                <p className="text-sm text-ink-soft">{photos.unavailableReason}</p>
-              )}
-            </div>
-          </Card>
+          {/* Only rendered when there are actual photos: a card whose whole
+              content is "no photo provider is configured" is noise on a page
+              a caller reads while someone is picking up the phone. */}
+          {photos.photos.length > 0 && (
+            <Card title="Photos" description="Real photos from the provider, shown only when they can be tied to this business.">
+              <div className="p-4">
+                <ul className="grid grid-cols-2 gap-2">
+                  {photos.photos.map((photo) => (
+                    <li key={photo.providerRef}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo.url}
+                        alt={`Photo of ${business.name} supplied by the business data provider`}
+                        className="h-28 w-full rounded-md border border-line object-cover"
+                        loading="lazy"
+                      />
+                      {photo.attribution && (
+                        <p className="mt-0.5 text-[10px] text-ink-muted">{photo.attribution}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-ink-muted">
+                  {photos.attribution} · Shown live from the provider and not stored. Photos are never generated.
+                </p>
+              </div>
+            </Card>
+          )}
 
           <Card title="Lead">
             <div className="space-y-4 p-4">

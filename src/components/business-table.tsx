@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getOpeningStatus } from '@/lib/hours/status';
-import { formatPhone, formatRelative, manualSearchUrl } from '@/lib/format';
+import { formatRelative, manualSearchUrl } from '@/lib/format';
+import { PhoneLink } from './phone-link';
 import type { LeadRow } from '@/lib/repo/leads';
 import type { LeadStatusDefinition } from '@/lib/types';
 import { qualificationShortLabel } from '@/lib/qualification/qualify';
@@ -39,7 +40,46 @@ export function BusinessTable({
   }
 
   return (
-    <div className="table-scroll">
+    <>
+      {/* Phones get a stacked card per business instead of a wide table. A
+          table that scrolls sideways hides exactly the two things a caller
+          needs — the number and the call button — behind a gesture most
+          people never discover. */}
+      <ul className="divide-y divide-line md:hidden">
+        {rows.map(({ business, lead, qualification }) => {
+          const opening = getOpeningStatus(business.openingHours);
+          return (
+            <li key={business.id} className={`px-4 py-3 ${business.excludedAt ? 'opacity-60' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <Link href={`/business/${business.id}`} className="font-medium text-ink underline-offset-2 hover:underline">
+                  {business.name}
+                </Link>
+                {business.isDemoData && <DemoBadge />}
+              </div>
+              <p className="mt-0.5 text-xs text-ink-soft">
+                <Value>{business.categoryLabel ?? business.category}</Value>
+                {business.city ? ` · ${business.city}` : ''}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <WebsiteStatusBadge status={business.websiteStatus} confidence={business.websiteConfidence} />
+                <OpenStateBadge state={opening.state} detail={opening.detail} compact />
+                {scope === 'pool' && (
+                  <Badge tone={qualification.qualifies ? 'good' : 'neutral'}>
+                    {qualificationShortLabel(qualification)}
+                  </Badge>
+                )}
+                {scope === 'leads' && lead && <LeadStatusBadge status={lead.status} statuses={statuses} />}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <PhoneLink phoneE164={business.phoneE164} />
+                {lead && <CallButton leadId={lead.id} phoneE164={business.phoneE164} />}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="table-scroll hidden md:block">
       <table className="table-wide w-full border-collapse text-sm">
         <caption className="sr-only">
           {scope === 'leads' ? 'Active leads' : 'Researched businesses'}, {rows.length} rows
@@ -132,13 +172,7 @@ export function BusinessTable({
                   {business.postalCode && <div className="text-xs text-ink-muted">{business.postalCode}</div>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap">
-                  {business.phoneE164 ? (
-                    <a href={`tel:${business.phoneE164}`} className="text-ink underline-offset-2 hover:underline">
-                      {formatPhone(business.phoneE164)}
-                    </a>
-                  ) : (
-                    <Value unknownLabel="No phone">{null}</Value>
-                  )}
+                  <PhoneLink phoneE164={business.phoneE164} />
                 </td>
                 <td className="px-3 py-2">
                   <WebsiteStatusBadge status={business.websiteStatus} confidence={business.websiteConfidence} />
@@ -202,6 +236,7 @@ export function BusinessTable({
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }

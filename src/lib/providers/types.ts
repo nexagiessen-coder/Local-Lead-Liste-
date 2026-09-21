@@ -17,12 +17,19 @@ import type { OpeningHours } from '@/lib/types';
 export class ProviderError extends Error {
   readonly provider: string;
   readonly retryable: boolean;
+  /** How long the provider itself asked us to wait, when it said so (Retry-After). */
+  readonly retryAfterMs: number | null;
 
-  constructor(provider: string, message: string, options: { retryable?: boolean; cause?: unknown } = {}) {
+  constructor(
+    provider: string,
+    message: string,
+    options: { retryable?: boolean; cause?: unknown; retryAfterMs?: number | null } = {},
+  ) {
     super(message, { cause: options.cause });
     this.name = 'ProviderError';
     this.provider = provider;
     this.retryable = options.retryable ?? false;
+    this.retryAfterMs = options.retryAfterMs ?? null;
   }
 }
 
@@ -51,9 +58,26 @@ export interface GeocodeResult {
   importance: number | null;
 }
 
+/** An address read back from a coordinate. Every field is optional: unknown stays null. */
+export interface ReverseGeocodeResult {
+  street: string | null;
+  houseNumber: string | null;
+  postalCode: string | null;
+  city: string | null;
+  region: string | null;
+  countryCode: string | null;
+}
+
 export interface GeocodingProvider {
   readonly info: ProviderInfo;
   geocode(query: string): Promise<GeocodeResult | null>;
+  /**
+   * The address at a coordinate. Used to complete an identity for a business
+   * the discovery source located precisely but described without an address —
+   * this adds a real, checkable fact rather than lowering the bar for what
+   * counts as identified. Returns null when the provider has no address there.
+   */
+  reverse(lat: number, lon: number): Promise<ReverseGeocodeResult | null>;
 }
 
 // --- Discovery --------------------------------------------------------------

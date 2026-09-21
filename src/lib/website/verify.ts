@@ -466,7 +466,11 @@ function channelEvidence(channel: ChannelResult): EvidenceItem {
     detail: channel.detail,
     sourceLabel: 'Research channel',
     sourceUrl: null,
-    stance: channel.status === 'ok' ? 'neutral' : 'contradicts',
+    // `skipped` means the channel deliberately did not apply (no permitted
+    // source for it), which neither supports nor contradicts a conclusion.
+    // Only a channel that *should* have run and could not — errored or
+    // unavailable — is evidence against trusting the result.
+    stance: channel.status === 'ok' || channel.status === 'skipped' ? 'neutral' : 'contradicts',
   };
 }
 

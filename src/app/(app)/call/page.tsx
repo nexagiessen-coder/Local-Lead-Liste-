@@ -4,7 +4,8 @@ import { requireUser } from '@/lib/auth/current-user';
 import { callingQueue, listLeadStatuses } from '@/lib/repo/leads';
 import { getBusiness } from '@/lib/repo/businesses';
 import { getOpeningStatus } from '@/lib/hours/status';
-import { formatPhone, formatRelative } from '@/lib/format';
+import { formatRelative } from '@/lib/format';
+import { PhoneLink } from '@/components/phone-link';
 import { BusinessDetail } from '@/components/business-detail';
 import { CallButton } from '@/components/call-button';
 import { LeadStatusBadge, OpenStateBadge, WebsiteStatusBadge } from '@/components/status';
@@ -86,7 +87,7 @@ export default async function CallPage({
                 </div>
               </div>
               <div className="text-right">
-                <p className="font-mono text-lg text-ink">{formatPhone(business.phoneE164) ?? 'No phone'}</p>
+                <PhoneLink phoneE164={business.phoneE164} size="lg" />
                 <p className="mt-0.5 text-xs text-ink-soft">
                   {current.lead?.callCount ?? 0} previous attempt(s) · last {formatRelative(current.lead?.lastCallAt ?? null)}
                 </p>
@@ -113,7 +114,7 @@ export default async function CallPage({
                   {row.business.name}
                 </Link>
                 <span className="text-xs text-ink-soft">{row.business.city}</span>
-                <span className="font-mono text-xs text-ink-soft">{formatPhone(row.business.phoneE164)}</span>
+                <PhoneLink phoneE164={row.business.phoneE164} />
                 {row.lead?.nextCallbackAt && (
                   <span className="text-xs text-warn">callback {formatRelative(row.lead.nextCallbackAt)}</span>
                 )}
