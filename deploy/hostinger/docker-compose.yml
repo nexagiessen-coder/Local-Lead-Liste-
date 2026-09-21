@@ -19,7 +19,7 @@ services:
     environment:
       APP_URL: https://${DOMAIN:?set DOMAIN in .env}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
-      DATABASE_PATH: /app/data/nexa-leads.sqlite
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env — a Postgres connection string from Supabase}
       DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-DE}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Berlin}
       DISCOVERY_PROVIDER: ${DISCOVERY_PROVIDER:-fixture}
@@ -35,8 +35,6 @@ services:
       GOOGLE_CSE_ENGINE_ID: ${GOOGLE_CSE_ENGINE_ID:-}
       MIN_CHANNELS_FOR_NO_WEBSITE: ${MIN_CHANNELS_FOR_NO_WEBSITE:-2}
       VERIFICATION_TTL_DAYS: ${VERIFICATION_TTL_DAYS:-30}
-    volumes:
-      - leads-data:/app/data
 
   caddy:
     image: caddy:2-alpine
@@ -58,7 +56,6 @@ services:
       - caddy-logs:/var/log/caddy
 
 volumes:
-  leads-data:
   caddy-data:
   caddy-config:
   caddy-logs:

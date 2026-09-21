@@ -1,10 +1,11 @@
 # NEXA Leads — run the whole app with one command:
 #
-#   cp .env.example .env     (then fill in SESSION_SECRET)
+#   cp .env.example .env     (then fill in SESSION_SECRET and DATABASE_URL)
 #   docker compose up -d --build
 #
-# The database lives in a named volume, so `docker compose down` and a rebuild
-# keep your leads and call history.
+# Data lives in Postgres (Supabase), not in this container, so there is no
+# local volume to manage — `docker compose down` and a rebuild are always
+# safe; the leads and call history live in the database DATABASE_URL points to.
 
 services:
   app:
@@ -18,7 +19,7 @@ services:
       # session cookies to Secure.
       APP_URL: ${APP_URL:-http://localhost:3000}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required — generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"}
-      DATABASE_PATH: /app/data/nexa-leads.sqlite
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required — a Postgres connection string from Supabase → Settings → Database → Connection string.}
       DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-DE}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Europe/Berlin}
       DISCOVERY_PROVIDER: ${DISCOVERY_PROVIDER:-fixture}
@@ -34,8 +35,3 @@ services:
       GOOGLE_CSE_ENGINE_ID: ${GOOGLE_CSE_ENGINE_ID:-}
       MIN_CHANNELS_FOR_NO_WEBSITE: ${MIN_CHANNELS_FOR_NO_WEBSITE:-2}
       VERIFICATION_TTL_DAYS: ${VERIFICATION_TTL_DAYS:-30}
-    volumes:
-      - leads-data:/app/data
-
-volumes:
-  leads-data:

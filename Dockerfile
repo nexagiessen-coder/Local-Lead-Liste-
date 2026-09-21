@@ -4,17 +4,14 @@
 #
 # Three stages so the shipped image carries no build tools and no source:
 # install → build → run. The runtime stage holds only the standalone server
-# bundle, the static assets and the SQL migrations.
+# bundle, the static assets and the SQL migrations. Data lives in a Postgres
+# database (Supabase), reached over the network via DATABASE_URL — the image
+# itself carries no database and needs no build toolchain for one, since `pg`
+# is a pure-JS driver with no native addon to compile.
 
 # --- Stage 1: dependencies ---------------------------------------------------
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
-
-# better-sqlite3 ships prebuilt binaries for this platform; the toolchain is
-# here only so a compile from source still succeeds if a prebuild is missing.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -35,8 +32,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0 \
-    DATABASE_PATH=/app/data/nexa-leads.sqlite
+    HOSTNAME=0.0.0.0
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nexa
@@ -47,10 +43,8 @@ COPY --from=builder /app/.next/static ./.next/static
 # directory, so they are copied explicitly rather than left to file tracing.
 COPY --from=builder /app/src/lib/db/migrations ./src/lib/db/migrations
 
-# The database lives on a mounted volume so it survives redeploys.
-RUN mkdir -p /app/data && chown -R nexa:nodejs /app
+RUN chown -R nexa:nodejs /app
 USER nexa
-VOLUME ["/app/data"]
 
 EXPOSE 3000
 

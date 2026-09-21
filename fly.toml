@@ -1,11 +1,16 @@
 # NEXA Leads — Fly.io configuration.
 #
 #   fly launch --no-deploy --copy-config
-#   fly volumes create leads_data --size 1 --region fra
 #   fly secrets set SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")"
+#   fly secrets set DATABASE_URL="<Postgres connection string from Supabase → Settings → Database>"
+#     (use the "Session pooler" or "Transaction pooler" form, not "Direct
+#     connection" — the direct form is IPv6-only and not every network path
+#     can reach it, while the poolers are IPv4-compatible.)
 #   fly deploy
 #
-# Rename `app` below to something unique before the first deploy.
+# Rename `app` below to something unique before the first deploy. Data lives
+# in Postgres (Supabase) over the network, not on this machine, so no volume
+# is needed here.
 
 app = "nexa-leads"
 primary_region = "fra"
@@ -14,7 +19,6 @@ primary_region = "fra"
   dockerfile = "Dockerfile"
 
 [env]
-  DATABASE_PATH = "/app/data/nexa-leads.sqlite"
   PORT = "3000"
   DEFAULT_COUNTRY = "DE"
   DEFAULT_TIMEZONE = "Europe/Berlin"
@@ -39,9 +43,3 @@ primary_region = "fra"
   method = "GET"
   path = "/api/health"
   timeout = "5s"
-
-# The SQLite database lives here. One machine only — a file database cannot be
-# shared between instances.
-[mounts]
-  source = "leads_data"
-  destination = "/app/data"

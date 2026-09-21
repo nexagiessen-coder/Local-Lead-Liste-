@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Pull the latest code and redeploy. The database volume is untouched.
+# Pull the latest code and redeploy. The database lives in Supabase, outside
+# this VPS entirely, so a redeploy here never touches it.
 
 set -euo pipefail
 

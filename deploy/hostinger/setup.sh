@@ -5,15 +5,22 @@
 #   ssh root@<your-vps-ip>
 #   curl -fsSL https://raw.githubusercontent.com/nexagiessen-coder/Local-Lead-Liste-/claude/local-lead-list-app-drb359/deploy/hostinger/setup.sh -o setup.sh
 #   less setup.sh          # read it before running it
-#   bash setup.sh leads.example.com you@example.com
+#   bash setup.sh leads.example.com you@example.com 'postgresql://postgres.xxx:pw@aws-0-region.pooler.supabase.com:5432/postgres'
 #
-# Safe to run again: it never overwrites an existing session secret and never
-# touches the database volume.
+# The third argument is a Postgres connection string from a Supabase project
+# (Settings -> Database -> Connection string; use the "Session pooler" or
+# "Transaction pooler" form, not "Direct connection"). Create a free project
+# at supabase.com first if you don't have one — this script doesn't do that
+# part for you, since it needs your Supabase account.
+#
+# Safe to run again: it never overwrites an existing session secret. Omit the
+# database URL on a re-run to keep the one already configured.
 
 set -euo pipefail
 
 DOMAIN="${1:-}"
 EMAIL="${2:-}"
+DATABASE_URL_ARG="${3:-}"
 BRANCH="${BRANCH:-claude/local-lead-list-app-drb359}"
 REPO="${REPO:-https://github.com/nexagiessen-coder/Local-Lead-Liste-.git}"
 APP_DIR="${APP_DIR:-/opt/nexa-leads}"
@@ -27,12 +34,16 @@ die()  { printf '\n\033[1;31mxx\033[0m %s\n\n' "$1" >&2; exit 1; }
 
 if [ -z "$DOMAIN" ]; then
   cat >&2 <<'USAGE'
-Usage: bash setup.sh <domain> [email]
+Usage: bash setup.sh <domain> [email] [database-url]
 
-  <domain>  The hostname people will open, e.g. leads.example.com
-            Point its DNS A record at this VPS's IP first, or the certificate
-            cannot be issued.
-  [email]   Optional. Let's Encrypt uses it for expiry warnings.
+  <domain>       The hostname people will open, e.g. leads.example.com
+                 Point its DNS A record at this VPS's IP first, or the
+                 certificate cannot be issued.
+  [email]        Optional. Let's Encrypt uses it for expiry warnings.
+  [database-url] A Postgres connection string from Supabase (Settings ->
+                 Database -> Connection string; use the pooler form).
+                 Required on the first run; omit on later runs to keep the
+                 one already configured.
 
 Running without a domain is not supported: session cookies are only sent over
 HTTPS in production, so the app needs a real hostname.
@@ -107,7 +118,16 @@ if [ -f "$ENV_FILE" ] && grep -q '^SESSION_SECRET=.\+' "$ENV_FILE"; then
   grep -q '^CADDY_EMAIL=' "$ENV_FILE" \
     && sed -i "s|^CADDY_EMAIL=.*|CADDY_EMAIL=$EMAIL|" "$ENV_FILE" \
     || echo "CADDY_EMAIL=$EMAIL" >> "$ENV_FILE"
+  if [ -n "$DATABASE_URL_ARG" ]; then
+    say "Updating the database connection string"
+    grep -q '^DATABASE_URL=' "$ENV_FILE" \
+      && sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL_ARG|" "$ENV_FILE" \
+      || echo "DATABASE_URL=$DATABASE_URL_ARG" >> "$ENV_FILE"
+  elif ! grep -q '^DATABASE_URL=.\+' "$ENV_FILE"; then
+    die "No DATABASE_URL is configured yet. Re-run with a Supabase connection string as the third argument."
+  fi
 else
+  [ -n "$DATABASE_URL_ARG" ] || die "A database URL is required on the first run. See the usage message above."
   say "Generating a session secret and writing $ENV_FILE"
   SECRET="$(openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' | tr -d '=')"
   cat > "$ENV_FILE" <<ENVEOF
@@ -115,6 +135,7 @@ else
 DOMAIN=$DOMAIN
 CADDY_EMAIL=$EMAIL
 SESSION_SECRET=$SECRET
+DATABASE_URL=$DATABASE_URL_ARG
 
 DEFAULT_COUNTRY=DE
 DEFAULT_TIMEZONE=Europe/Berlin

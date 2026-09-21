@@ -1,33 +1,34 @@
 # NEXA Leads — Render blueprint.
 #
-# Render is a good fit because the app needs a persistent disk for its SQLite
-# database and a process that stays alive between requests (research runs in
-# the background). A disk requires a paid instance type; the free tier has no
-# persistent storage and would lose your leads on every deploy.
+# Data lives in Postgres (Supabase), reached over the network via
+# DATABASE_URL, so this service itself is stateless — no persistent disk to
+# attach, which means it can run on Render's free tier. Research still runs
+# in the background within one long-lived process, so it needs a process
+# that stays alive between requests (which the free tier also provides; it
+# just sleeps after inactivity on the free plan).
 
 services:
   - type: web
     name: nexa-leads
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: frankfurt
     healthCheckPath: /api/health
-    # One instance only: the database is a file on the attached disk.
-    numInstances: 1
     # A "Deploy to Render" button should not auto-redeploy on every push to
     # this repository; each click creates its own independent instance.
     autoDeploy: false
-    disk:
-      name: nexa-leads-data
-      mountPath: /app/data
-      sizeGB: 1
     envVars:
       # Generated once by Render and never shown in the repository.
       - key: SESSION_SECRET
         generateValue: true
-      - key: DATABASE_PATH
-        value: /app/data/nexa-leads.sqlite
+      # Set this in the Render dashboard to a Postgres connection string from
+      # Supabase → Settings → Database → Connection string. Use the "Session
+      # pooler" or "Transaction pooler" form (not "Direct connection" — that
+      # one is IPv6-only and most PaaS networks, Render included, can't reach
+      # it). Left unset here so no connection string is ever committed.
+      - key: DATABASE_URL
+        sync: false
       - key: DEFAULT_COUNTRY
         value: DE
       - key: DEFAULT_TIMEZONE

@@ -39,7 +39,7 @@ project skill `.claude/skills/lead-verification/SKILL.md`:
 | --- | --- | --- |
 | App framework | **Next.js 15 (App Router) + React 19 + TypeScript** | One deployable unit for UI + API; server components keep the heavy table fast; familiar and maintainable. |
 | Styling | **Tailwind CSS v4** with a small token layer | Bright, clean, spreadsheet-friendly UI without a heavy component library. |
-| Database | **SQLite (better-sqlite3, WAL)** via **Drizzle ORM** | 4 users, single server — SQLite is the right size, needs no external service, and is trivially backed up. Drizzle keeps the schema typed and portable to Postgres later. |
+| Database | **PostgreSQL** (hosted on Supabase) via **`pg`**, hand-written SQL | A managed Postgres instance means the app itself stays stateless and can run on ordinary shared/PaaS hosting with no local disk to back up; `pg` is a pure-JS driver, so no native build step is needed. |
 | Migrations | Hand-written SQL files + a tiny runner (`scripts/migrate.ts`) | Deterministic, reviewable, no engine downloads. |
 | Auth | Custom: scrypt password hashing (`node:crypto`), server-side sessions, httpOnly SameSite=Lax cookies | No third-party dependency, no secrets leaving the server, full control over 4-user invite flow. |
 | Validation | **zod** | One schema definition for API input validation. |
@@ -78,7 +78,7 @@ leads.
 
 ## 5. Data model
 
-Tables (SQLite, all timestamps are unix epoch ms, UTC):
+Tables (PostgreSQL, all timestamps are unix epoch ms, UTC, stored as `BIGINT`):
 
 - `users`, `sessions` — auth, up to 4 active users, roles `admin` / `member`.
 - `businesses` — canonical business identity (one row per real-world location).

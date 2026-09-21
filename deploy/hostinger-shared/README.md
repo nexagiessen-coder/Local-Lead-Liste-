@@ -16,6 +16,12 @@ Node.js Selector explicitly auto-detects Next.js apps. `deploy/hostinger/`
 customisation; this path is for getting a working deployment with zero new
 spend and no VPS.
 
+The database is **Postgres, hosted on Supabase** (a separate free service —
+see below), not a file on Hostinger's disk. This removes what used to be the
+biggest source of uncertainty on shared hosting: no local database file to
+place on a surviving path, and no native module (`better-sqlite3`) that had
+to compile successfully against Hostinger's exact build image.
+
 ## What's known to work
 
 - hPanel deploys directly from a GitHub repository, with automatic rebuilds
@@ -27,30 +33,37 @@ spend and no VPS.
   redeploys — no `.env` file to manage.
 - Passenger sets `PORT` for the app to bind to; `next start` (this app's
   `npm start`) already honours `process.env.PORT` without extra configuration.
-- The app migrates its own SQLite database on first request
-  (`getDb()` in `src/lib/db/index.ts` calls `runMigrations()` automatically),
-  so there is no separate migration step to run by hand.
+- The app migrates its own Postgres database on first request
+  (`ensureMigrated()` in `src/lib/db/index.ts` runs automatically inside every
+  query), so there is no separate migration step to run by hand.
+- `pg`, the Postgres driver, is a pure-JS package with no native addon to
+  compile, so there's no `better-sqlite3`-style install-failure risk.
+
+## One-time setup: a Supabase project
+
+1. Create a free project at [supabase.com](https://supabase.com) (no card
+   required for the free tier).
+2. In the new project, go to **Settings → Database → Connection string** and
+   copy the **Session pooler** or **Transaction pooler** form (not "Direct
+   connection" — that one is IPv6-only, and most shared hosting, Hostinger
+   included, only routes IPv4 outbound). It looks like:
+   `postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+3. That's the whole setup — no need to run migrations or create tables by
+   hand; the app does that itself on first request.
 
 ## What to verify once you're in hPanel (genuinely unknown from here)
 
-These depend on your specific account and can't be confirmed without access
-to it:
+Only one real unknown remains, now that the database is external:
 
-1. **Where the SQLite file should live.** It must be a path that survives a
-   redeploy (a `git pull`-style update, not a full wipe). Look at the app's
-   file manager for a location outside the repository's own tracked files —
-   commonly a sibling folder to the app root, e.g.
-   `/home/<user>/data/nexa-leads.sqlite`. Set `DATABASE_PATH` to that
-   absolute path. If unsure, ask Hostinger support "which directories survive
-   a Node.js app redeploy" before your first real research run — recreating
-   the database is cheap on day one, expensive after your team has called
-   50 leads.
-2. **Whether better-sqlite3's prebuilt binary installs cleanly.** It ships
-   prebuilt binaries for standard Linux x64, which is very likely what
-   Hostinger's build runs on, but this hasn't been verified against their
-   exact build image. Check the build log after the first deploy; a failure
-   here shows up as an install error naming `better-sqlite3`.
-3. **How Passenger handles a long research run.** Passenger can recycle an
+1. **Whether Hostinger's outbound network reaches Supabase's pooler.** Shared
+   hosting sometimes restricts outbound connections to specific ports. Port
+   `5432` (session pooler) and `6543` (transaction pooler) should both be
+   ordinary outbound TCP, but this hasn't been confirmed against Hostinger's
+   exact network policy. If the app fails to start with a connection timeout
+   or "ECONNREFUSED" in the Runtime Log, this is the first thing to check —
+   try switching from the session pooler string to the transaction pooler
+   string (or vice versa), since they're occasionally filtered differently.
+2. **How Passenger handles a long research run.** Passenger can recycle an
    idle worker process. A background research run (the pipeline in
    `src/lib/discovery/pipeline.ts` continues after the HTTP response) could
    in principle be interrupted if the process is recycled mid-run. For a
@@ -58,7 +71,9 @@ to it:
    case, not a certainty — but it's a real difference from the VPS/Docker
    path, where the process is never recycled underneath a running job. If
    research runs seem to stop partway through, this is the first thing to
-   suspect.
+   suspect. Unlike the old SQLite setup, a recycled worker can never corrupt
+   or lose data — Postgres survives it — the risk is only an interrupted run
+   showing as `partial` rather than `completed`, which is safe to re-run.
 
 ## Steps
 
@@ -75,7 +90,7 @@ to it:
    | Key | Value |
    | --- | --- |
    | `SESSION_SECRET` | generate with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` on any machine, or ask — it's just 48 random bytes |
-   | `DATABASE_PATH` | an absolute path outside the repo that survives redeploys — see above |
+   | `DATABASE_URL` | the Supabase pooler connection string from the setup step above |
    | `APP_URL` | your Hostinger-assigned domain, e.g. `https://yourapp.hostingersite.com`, with `https://` |
    | `DEFAULT_COUNTRY` | `DE` |
    | `DEFAULT_TIMEZONE` | `Europe/Berlin` |
@@ -90,10 +105,9 @@ to it:
 ## If it doesn't work
 
 If the build or start fails, the Runtime Logs in hPanel's Node.js app screen
-say why. The three likely causes, in order of likelihood: a missing/incorrect
-`DATABASE_PATH` (the app can't write the database file — check the directory
-exists and is writable), a `better-sqlite3` install failure (see point 2
-above), or a missing `SESSION_SECRET` (the app refuses to start below 32
-characters, by design — see `assertServerConfig()` in `src/lib/env.ts`).
+say why. The two likely causes, in order of likelihood: a connection failure
+to Supabase (see point 1 above — try the other pooler string), or a missing
+`SESSION_SECRET` (the app refuses to start below 32 characters, by design —
+see `assertServerConfig()` in `src/lib/env.ts`).
 
 Paste the Runtime Log error and it can be diagnosed from there.

@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // image needs neither node_modules nor a package install at runtime.
   output: 'standalone',
   poweredByHeader: false,
-  serverExternalPackages: ['better-sqlite3'],
+  serverExternalPackages: ['pg'],
   async headers() {
     return [
       {

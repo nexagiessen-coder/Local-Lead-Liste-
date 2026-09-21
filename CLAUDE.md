@@ -29,7 +29,8 @@ business really have no website?**
 ## Stack
 
 Next.js 15 (App Router) · React 19 · TypeScript (strict) · Tailwind v4 ·
-SQLite via better-sqlite3 with hand-written SQL migrations · Vitest.
+PostgreSQL (Supabase) via `pg` with hand-written SQL migrations · Vitest
+(with `pg-mem` for an isolated in-memory database in tests).
 Auth is custom: scrypt passwords, server-side sessions, httpOnly cookies.
 
 ## Commands
@@ -46,8 +47,8 @@ npm run test:e2e   # browser smoke test (needs the app running)
 
 - Keep the pipeline stages in separate modules; providers never reach into the
   verification engine.
-- Data access lives in `src/lib/repo/*` and takes an optional `db` argument so
-  tests can pass an in-memory database.
+- Data access lives in `src/lib/repo/*`, every function is `async`, and takes
+  an optional `db` argument so tests can pass an isolated pg-mem database.
 - Add a test to `tests/website-verification.test.ts` for every new status path.
 - Mutations go through server actions or route handlers that validate with zod
   and check the request origin.

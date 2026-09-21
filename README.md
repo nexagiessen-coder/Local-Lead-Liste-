@@ -65,7 +65,10 @@ up for future contributors in `.claude/skills/lead-verification/SKILL.md`.
 
 ## Getting started
 
-Requirements: **Node.js 20.11+** (22 recommended). No database server needed.
+Requirements: **Node.js 20.11+** (22 recommended), and a **Postgres database**
+— this app is built for [Supabase](https://supabase.com)'s free tier: create a
+project there, then copy its connection string from
+**Settings → Database → Connection string**.
 
 ```bash
 git clone <this repository>
@@ -75,8 +78,9 @@ npm install
 cp .env.example .env
 # Generate a session secret and paste it into SESSION_SECRET:
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+# Paste your Supabase connection string into DATABASE_URL.
 
-npm run db:migrate     # creates ./data/local-lead-list.sqlite
+npm run db:migrate     # creates the tables in your Supabase project
 npm run dev            # http://localhost:3000
 ```
 
@@ -92,32 +96,46 @@ everywhere they appear and are never presented as real research.
 
 ## Putting it online
 
-NEXA Leads is a normal long-running web server with a SQLite database on disk.
-That shapes where it can live:
+The database is **Postgres**, and this app is built for a **Supabase**
+project specifically — create a free one at [supabase.com](https://supabase.com)
+(no card required), then take the connection string from
+**Settings → Database → Connection string** (use the "Session pooler" or
+"Transaction pooler" form; "Direct connection" is IPv6-only and many hosts
+can't reach it). That single `DATABASE_URL` is the only thing every option
+below needs from you.
 
-- It needs a **persistent disk**. The database is a file; a platform with an
-  ephemeral filesystem loses every lead on each deploy.
-- It needs a **process that stays alive between requests**. A research run keeps
-  working in the background after the response is sent.
-- It runs as **one instance**. A file database cannot be shared between several.
+Because the database is no longer a local file, the app itself is stateless
+and needs no persistent disk. What it still needs:
 
-So: a small VPS (Hostinger, Hetzner, DigitalOcean), a container host, Render,
-Fly.io, Railway — all fine. Shared or "Business" web hosting is not, even when
-it advertises Node.js support, because it starts a process per request.
-**Vercel, Netlify and other serverless hosts are not**, however convenient they
-look. Deploying there gives you an app that appears to work and silently throws
-away your data.
+- A **process that stays alive between requests**. A research run keeps
+  working in the background after the response is sent, tracked in memory —
+  a platform that only runs code per-request (classic serverless functions)
+  would cut that off partway through.
+- To run as **one instance**. The in-memory "don't start two research runs at
+  once" guard is per-process, so more than one instance could race past it.
 
-### Option 1 — Hostinger VPS (one command, your own domain)
+So: Hostinger's Unlimited plan, a small VPS (Hostinger, Hetzner,
+DigitalOcean), a container host, Render, Fly.io, Railway — all fine.
+**Vercel, Netlify and other classic serverless hosts are still not a good
+fit**, however convenient they look, because of the background-run point
+above — not because of the database anymore.
 
-Pick any **VPS** plan with an **Ubuntu** template — not shared, Business or
-Cloud hosting, which cannot keep a process alive between requests. Point your
-domain's A record at the VPS, SSH in as root, then:
+### Option 1 — Hostinger Unlimited plan (no VPS, nothing new to buy)
+
+If you already have Hostinger's **Unlimited** (formerly "Business") web
+hosting plan, you don't need a VPS at all — hPanel's Node.js Selector runs
+this app directly, deployed straight from this GitHub repository. Full
+walkthrough: [`deploy/hostinger-shared/README.md`](deploy/hostinger-shared/README.md).
+
+### Option 2 — Hostinger VPS (one command, your own domain)
+
+Pick any **VPS** plan with an **Ubuntu** template. Point your domain's A
+record at the VPS, SSH in as root, then:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nexagiessen-coder/Local-Lead-Liste-/claude/local-lead-list-app-drb359/deploy/hostinger/setup.sh -o setup.sh
 less setup.sh                                   # read it before you run it
-bash setup.sh leads.example.com you@example.com
+bash setup.sh leads.example.com you@example.com 'postgresql://postgres.xxx:pw@aws-0-region.pooler.supabase.com:5432/postgres'
 ```
 
 That installs Docker, locks the firewall down to SSH and HTTPS, generates a
@@ -125,59 +143,55 @@ session secret, and starts the app behind Caddy with an automatic Let's Encrypt
 certificate. Re-running it is safe. Full notes, backups and troubleshooting:
 [`deploy/hostinger/README.md`](deploy/hostinger/README.md).
 
-### Option 2 — on your own machine (fastest)
+### Option 3 — on your own machine (fastest)
 
 ```bash
 npm install
 cp .env.example .env
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # paste into SESSION_SECRET
-npm run db:migrate
+# paste your Supabase connection string into DATABASE_URL
 npm run build && npm run start
 ```
 
 Open <http://localhost:3000> and complete the first-run setup. Everyone on the
 same network can reach it at `http://<your-machine-ip>:3000`.
 
-### Option 3 — Docker, one command
+### Option 4 — Docker, one command
 
 ```bash
-cp .env.example .env    # set SESSION_SECRET
+cp .env.example .env    # set SESSION_SECRET and DATABASE_URL
 docker compose up -d --build
 ```
 
-The database lives in a named volume, so rebuilds and `docker compose down`
-keep your leads and call history. To back up:
+There's no volume to manage — the container is disposable; rebuilds and
+`docker compose down` never touch your data, since it all lives in Supabase.
 
-```bash
-docker compose exec app sh -c 'sqlite3 /app/data/nexa-leads.sqlite ".backup /app/data/backup.sqlite"' \
-  || docker compose cp app:/app/data ./backup
-```
+### Option 5 — Render (a public URL in about five minutes)
 
-### Option 4 — Render (a public URL in about five minutes)
-
-The repository contains a `render.yaml` blueprint with the disk, health check
-and a generated `SESSION_SECRET` already configured.
+The repository contains a `render.yaml` blueprint with the health check and a
+generated `SESSION_SECRET` already configured.
 
 1. Go to **<https://dashboard.render.com/blueprints>** → *New Blueprint Instance*.
 2. Pick this repository and the branch that holds the app.
-3. Render reads `render.yaml`, attaches a 1 GB disk and deploys.
-4. Open the URL it gives you and complete the first-run setup.
+3. Render reads `render.yaml` and deploys on the **free** plan.
+4. In the Render dashboard, set `DATABASE_URL` to your Supabase connection
+   string (left blank in the blueprint on purpose, so it's never committed).
+5. Open the URL it gives you and complete the first-run setup.
 
-The blueprint asks for the `starter` instance type because a persistent disk
-requires a paid plan — the free tier has no disk and would reset the database on
-every deploy. `APP_URL` is optional here: the app falls back to Render's own
-external URL.
+No disk is needed here — the free tier is enough, since there is nothing
+local left to persist. `APP_URL` is optional here too: the app falls back to
+Render's own external URL.
 
-### Option 5 — Fly.io
+### Option 6 — Fly.io
 
 ```bash
 fly launch --no-deploy --copy-config      # rename the app first in fly.toml
-fly volumes create leads_data --size 1 --region fra
 fly secrets set SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")"
+fly secrets set DATABASE_URL="<your Supabase connection string>"
 fly deploy
 ```
 
-`fly.toml` keeps one machine running and mounts the volume at `/app/data`.
+`fly.toml` keeps one machine running; there's no volume to create.
 
 ### After the first deploy
 
@@ -189,7 +203,10 @@ fly deploy
    one automatically. It switches session cookies to `Secure` and tightens the
    CSRF origin check.
 
-Back up `data/nexa-leads.sqlite` (and its `-wal` file) like any other database.
+Back up your data with Supabase's own backups (Database → Backups in the
+Supabase dashboard) and/or `pg_dump` — see
+[`deploy/hostinger/backup.sh`](deploy/hostinger/backup.sh) for a working
+example you can adapt to any host.
 
 ---
 
@@ -231,7 +248,7 @@ proxied through the app so no user's browser talks to a provider directly.
 npm run dev         # development server
 npm run typecheck   # TypeScript, strict
 npm run lint        # ESLint
-npm run test        # 116 unit and integration tests (Vitest)
+npm run test        # 131 unit and integration tests (Vitest)
 npm run check       # all three
 npm run test:e2e    # browser smoke test against a running server
 ```
@@ -252,7 +269,7 @@ src/lib/discovery/     categories, radius search, research pipeline
 src/lib/identity/      identity resolution and deduplication
 src/lib/website/       candidate discovery, scoring, verification engine
 src/lib/qualification/ what may become a lead
-src/lib/repo/          typed SQLite data access
+src/lib/repo/          typed Postgres data access
 src/lib/hours/         opening-hours parsing and open/closed state
 src/lib/command/       natural-language command parser (DE + EN)
 src/app/               Next.js routes (App Router)
