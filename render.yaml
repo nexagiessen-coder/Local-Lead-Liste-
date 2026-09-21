@@ -15,6 +15,9 @@ services:
     healthCheckPath: /api/health
     # One instance only: the database is a file on the attached disk.
     numInstances: 1
+    # A "Deploy to Render" button should not auto-redeploy on every push to
+    # this repository; each click creates its own independent instance.
+    autoDeploy: false
     disk:
       name: nexa-leads-data
       mountPath: /app/data
