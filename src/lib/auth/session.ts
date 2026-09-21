@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { getDb } from '@/lib/db';
+import { getDb, one, run, type Db } from '@/lib/db';
 import { randomToken } from '@/lib/ids';
 import { DAY } from '@/lib/time';
 import type { User, UserRole } from '@/lib/types';
@@ -43,65 +43,68 @@ export interface CreatedSession {
   expiresAt: number;
 }
 
-export function createSession(
+export async function createSession(
   userId: string,
   meta: { userAgent?: string | null; ip?: string | null } = {},
-): CreatedSession {
-  const db = getDb();
+  db: Db = getDb(),
+): Promise<CreatedSession> {
   const token = randomToken(32);
   const now = Date.now();
   const expiresAt = now + SESSION_TTL_MS;
-  db.prepare(
+  await run(
+    db,
     `INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at, user_agent, ip)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(hashSessionToken(token), userId, now, expiresAt, now, meta.userAgent ?? null, meta.ip ?? null);
-  db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now, userId);
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [hashSessionToken(token), userId, now, expiresAt, now, meta.userAgent ?? null, meta.ip ?? null],
+  );
+  await run(db, 'UPDATE users SET last_login_at = $1 WHERE id = $2', [now, userId]);
   return { token, expiresAt };
 }
 
 /** Resolves a session token to an active user, refreshing the session lazily. */
-export function resolveSession(token: string | undefined | null): User | null {
+export async function resolveSession(
+  token: string | undefined | null,
+  db: Db = getDb(),
+): Promise<User | null> {
   if (!token) return null;
-  const db = getDb();
   const id = hashSessionToken(token);
-  const row = db
-    .prepare(
-      `SELECT s.expires_at AS expires_at, s.last_seen_at AS last_seen_at,
-              u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.updated_at, u.last_login_at
-         FROM sessions s
-         JOIN users u ON u.id = s.user_id
-        WHERE s.id = ?`,
-    )
-    .get(id) as (UserRow & { expires_at: number; last_seen_at: number }) | undefined;
+  const row = await one<UserRow & { expires_at: number; last_seen_at: number }>(
+    db,
+    `SELECT s.expires_at AS expires_at, s.last_seen_at AS last_seen_at,
+            u.id, u.email, u.name, u.role, u.is_active, u.created_at, u.updated_at, u.last_login_at
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.id = $1`,
+    [id],
+  );
 
   if (!row) return null;
   const now = Date.now();
   if (row.expires_at <= now) {
-    db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    await run(db, 'DELETE FROM sessions WHERE id = $1', [id]);
     return null;
   }
   if (row.is_active !== 1) return null;
 
   if (now - row.last_seen_at > REFRESH_INTERVAL_MS) {
-    db.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?').run(
+    await run(db, 'UPDATE sessions SET last_seen_at = $1, expires_at = $2 WHERE id = $3', [
       now,
       now + SESSION_TTL_MS,
       id,
-    );
+    ]);
   }
   return mapUser(row);
 }
 
-export function destroySession(token: string | undefined | null): void {
+export async function destroySession(token: string | undefined | null, db: Db = getDb()): Promise<void> {
   if (!token) return;
-  getDb().prepare('DELETE FROM sessions WHERE id = ?').run(hashSessionToken(token));
+  await run(db, 'DELETE FROM sessions WHERE id = $1', [hashSessionToken(token)]);
 }
 
-export function destroyAllSessionsForUser(userId: string): void {
-  getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+export async function destroyAllSessionsForUser(userId: string, db: Db = getDb()): Promise<void> {
+  await run(db, 'DELETE FROM sessions WHERE user_id = $1', [userId]);
 }
 
-export function purgeExpiredSessions(): number {
-  const result = getDb().prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
-  return result.changes;
+export async function purgeExpiredSessions(db: Db = getDb()): Promise<number> {
+  return run(db, 'DELETE FROM sessions WHERE expires_at <= $1', [Date.now()]);
 }

@@ -1,9 +1,14 @@
+import { newDb } from 'pg-mem';
+import { ensureMigrated, run, type Db } from '@/lib/db';
 import { FixtureDiscoveryProvider } from '@/lib/providers/discovery/fixture';
 import { FixtureWebSearchProvider } from '@/lib/providers/search/fixture';
 import { FixtureHttpFetcher } from '@/lib/providers/http/fixture';
+import { FixtureGeocodingProvider } from '@/lib/providers/geocoding/fixture';
+import { NoPhotoProvider } from '@/lib/providers/photos/google-places';
 import { buildIdentity } from '@/lib/identity/identity';
 import type { RawBusinessCandidate } from '@/lib/providers/types';
 import type { ResolvedIdentity } from '@/lib/identity/identity';
+import type { ProviderSet } from '@/lib/providers/registry';
 
 /** All demo businesses as raw provider candidates. */
 export async function loadFixtureCandidates(): Promise<RawBusinessCandidate[]> {
@@ -38,21 +43,26 @@ export function fixtureProviders() {
   };
 }
 
-import type { Database } from 'better-sqlite3';
-import { createInMemoryDb } from '@/lib/db';
-import { FixtureGeocodingProvider } from '@/lib/providers/geocoding/fixture';
-import { NoPhotoProvider } from '@/lib/providers/photos/google-places';
-import type { ProviderSet } from '@/lib/providers/registry';
+/**
+ * A freshly migrated, isolated database for one test — backed by `pg-mem`, a
+ * pure-JS Postgres-compatible engine, rather than a real Postgres server.
+ * Each call creates its own in-memory instance, so tests never share state
+ * and don't need a running database to pass.
+ */
+export async function testDb(): Promise<{ db: Db; userId: string }> {
+  const mem = newDb({ autoCreateForeignKeyIndices: true });
+  const { Pool } = mem.adapters.createPg();
+  const db = new Pool() as unknown as Db;
+  await ensureMigrated(db);
 
-/** A migrated in-memory database with one test user. */
-export function testDb(): { db: Database; userId: string } {
-  const db = createInMemoryDb();
   const userId = 'usr_test';
   const now = Date.now();
-  db.prepare(
+  await run(
+    db,
     `INSERT INTO users (id, email, name, role, password_hash, password_salt, is_active, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,1,?,?)`,
-  ).run(userId, 'test@example.com', 'Test User', 'admin', 'x', 'y', now, now);
+     VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8)`,
+    [userId, 'test@example.com', 'Test User', 'admin', 'x', 'y', now, now],
+  );
   return { db, userId };
 }
 

@@ -21,9 +21,9 @@
     "setup": "npm run db:migrate && npm run db:seed"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "libphonenumber-js": "^1.13.13",
     "next": "^15.5.25",
+    "pg": "^8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"
@@ -31,12 +31,13 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^15.5.25",
+    "pg-mem": "^3.0.14",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",

@@ -15,9 +15,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const users = listUsers(true);
-  const activeCount = countActiveUsers();
-  const statuses = listLeadStatuses();
+  const [users, activeCount, statuses] = await Promise.all([
+    listUsers(true),
+    countActiveUsers(),
+    listLeadStatuses(),
+  ]);
   const providers = describeProviders();
 
   return (

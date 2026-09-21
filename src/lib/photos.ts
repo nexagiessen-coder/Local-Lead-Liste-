@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { getDb, one } from '@/lib/db';
 import { createPhotoProvider } from '@/lib/providers/registry';
 import { ProviderError, type PhotoRef } from '@/lib/providers/types';
 
@@ -31,15 +31,13 @@ export async function getBusinessPhotos(businessId: string): Promise<PhotoResult
     };
   }
 
-  const source = getDb()
-    .prepare(
-      `SELECT external_id FROM business_sources
-        WHERE business_id = ? AND provider = ?
-        ORDER BY fetched_at DESC LIMIT 1`,
-    )
-    .get(businessId, provider.info.id === 'google-places' ? 'google-places' : provider.info.id) as
-    | { external_id: string }
-    | undefined;
+  const source = await one<{ external_id: string }>(
+    getDb(),
+    `SELECT external_id FROM business_sources
+      WHERE business_id = $1 AND provider = $2
+      ORDER BY fetched_at DESC LIMIT 1`,
+    [businessId, provider.info.id === 'google-places' ? 'google-places' : provider.info.id],
+  );
 
   if (!source) {
     return {

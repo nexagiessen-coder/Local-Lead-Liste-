@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3';
-import { getDb } from '@/lib/db';
+import { getDb, many, one, run, transaction, type Db } from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { qualifyBusiness } from '@/lib/qualification/qualify';
 import { mapBusiness } from './businesses';
@@ -36,9 +35,9 @@ export interface ListFilters {
 }
 
 const SORT_COLUMNS: Record<string, string> = {
-  name: 'b.name COLLATE NOCASE',
-  city: 'b.city COLLATE NOCASE',
-  category: 'b.category_label COLLATE NOCASE',
+  name: 'LOWER(b.name)',
+  city: 'LOWER(b.city)',
+  category: 'LOWER(b.category_label)',
   website: 'b.website_status',
   confidence: 'b.website_confidence',
   identity: 'b.identity_confidence',
@@ -68,9 +67,25 @@ interface JoinedRow extends Record<string, unknown> {
   lead_updated_at: number | null;
 }
 
+/**
+ * Builds a `WHERE` clause with Postgres `$1, $2, …` placeholders.
+ *
+ * A small counter closure tracks the next placeholder number, since (unlike
+ * SQLite's positional `?`) each Postgres placeholder is numbered and must
+ * match its position in the parameter array.
+ */
 function buildWhere(filters: ListFilters): { sql: string; params: unknown[] } {
   const clauses: string[] = [];
   const params: unknown[] = [];
+  const next = () => {
+    params.push(undefined); // placeholder slot, filled by the caller below
+    return params.length;
+  };
+  const push = (value: unknown) => {
+    const i = next();
+    params[i - 1] = value;
+    return `$${i}`;
+  };
 
   if (filters.scope === 'leads') clauses.push('l.id IS NOT NULL');
   if (!filters.includeExcluded) clauses.push('b.excluded_at IS NULL');
@@ -78,36 +93,33 @@ function buildWhere(filters: ListFilters): { sql: string; params: unknown[] } {
 
   if (filters.search) {
     const needle = `%${filters.search.trim().toLowerCase()}%`;
+    const p = push(needle);
     clauses.push(
-      '(LOWER(b.name) LIKE ? OR LOWER(b.city) LIKE ? OR LOWER(b.street) LIKE ? OR b.phone_e164 LIKE ? OR LOWER(b.postal_code) LIKE ?)',
+      `(LOWER(b.name) LIKE ${p} OR LOWER(b.city) LIKE ${p} OR LOWER(b.street) LIKE ${p} OR b.phone_e164 LIKE ${p} OR LOWER(b.postal_code) LIKE ${p})`,
     );
-    params.push(needle, needle, needle, needle, needle);
   }
   if (filters.websiteStatus?.length) {
-    clauses.push(`b.website_status IN (${filters.websiteStatus.map(() => '?').join(',')})`);
-    params.push(...filters.websiteStatus);
+    const ps = filters.websiteStatus.map((v) => push(v));
+    clauses.push(`b.website_status IN (${ps.join(',')})`);
   }
   if (filters.identityStatus?.length) {
-    clauses.push(`b.identity_status IN (${filters.identityStatus.map(() => '?').join(',')})`);
-    params.push(...filters.identityStatus);
+    const ps = filters.identityStatus.map((v) => push(v));
+    clauses.push(`b.identity_status IN (${ps.join(',')})`);
   }
   if (filters.leadStatus?.length) {
-    clauses.push(`l.status IN (${filters.leadStatus.map(() => '?').join(',')})`);
-    params.push(...filters.leadStatus);
+    const ps = filters.leadStatus.map((v) => push(v));
+    clauses.push(`l.status IN (${ps.join(',')})`);
   }
   if (filters.assignedUserId === 'unassigned') {
     clauses.push('l.assigned_user_id IS NULL');
   } else if (filters.assignedUserId) {
-    clauses.push('l.assigned_user_id = ?');
-    params.push(filters.assignedUserId);
+    clauses.push(`l.assigned_user_id = ${push(filters.assignedUserId)}`);
   }
   if (filters.category) {
-    clauses.push('b.category = ?');
-    params.push(filters.category);
+    clauses.push(`b.category = ${push(filters.category)}`);
   }
   if (filters.city) {
-    clauses.push('b.city_normalized = ?');
-    params.push(filters.city);
+    clauses.push(`b.city_normalized = ${push(filters.city)}`);
   }
   if (filters.qualifiedOnly) {
     clauses.push("b.website_status = 'VERIFIED_NO_WEBSITE'");
@@ -121,8 +133,7 @@ function buildWhere(filters: ListFilters): { sql: string; params: unknown[] } {
     clauses.push('(l.call_count IS NULL OR l.call_count = 0)');
   }
   if (filters.callbackDue) {
-    clauses.push('l.next_callback_at IS NOT NULL AND l.next_callback_at <= ?');
-    params.push(Date.now());
+    clauses.push(`l.next_callback_at IS NOT NULL AND l.next_callback_at <= ${push(Date.now())}`);
   }
 
   return { sql: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
@@ -135,32 +146,32 @@ const BASE_FROM = `
   LEFT JOIN users u ON u.id = l.assigned_user_id
 `;
 
-export function listBusinessRows(filters: ListFilters, db: Database = getDb()): LeadRow[] {
+export async function listBusinessRows(filters: ListFilters, db: Db = getDb()): Promise<LeadRow[]> {
   const { sql: where, params } = buildWhere(filters);
   const sortKey = filters.sort && SORT_COLUMNS[filters.sort] ? filters.sort : 'name';
   const direction = filters.direction === 'desc' ? 'DESC' : 'ASC';
   const limit = Math.min(500, Math.max(1, filters.limit ?? 100));
   const offset = Math.max(0, filters.offset ?? 0);
 
-  const rows = db
-    .prepare(
-      `SELECT b.*, l.id AS lead_id, l.status AS lead_status, l.assigned_user_id, u.name AS assigned_user_name,
-              l.priority, l.qualification_json, l.call_count, l.last_call_at, l.last_call_by,
-              l.next_callback_at, l.locked_by, l.locked_at, l.created_by,
-              l.created_at AS lead_created_at, l.updated_at AS lead_updated_at
-       ${BASE_FROM} ${where}
-       ORDER BY ${SORT_COLUMNS[sortKey]} ${direction} NULLS LAST, b.name COLLATE NOCASE ASC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...params, limit, offset) as JoinedRow[];
+  const rows = await many<JoinedRow>(
+    db,
+    `SELECT b.*, l.id AS lead_id, l.status AS lead_status, l.assigned_user_id, u.name AS assigned_user_name,
+            l.priority, l.qualification_json, l.call_count, l.last_call_at, l.last_call_by,
+            l.next_callback_at, l.locked_by, l.locked_at, l.created_by,
+            l.created_at AS lead_created_at, l.updated_at AS lead_updated_at
+     ${BASE_FROM} ${where}
+     ORDER BY ${SORT_COLUMNS[sortKey]} ${direction} NULLS LAST, LOWER(b.name) ASC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset],
+  );
 
   return rows.map(mapJoinedRow);
 }
 
-export function countBusinessRows(filters: ListFilters, db: Database = getDb()): number {
+export async function countBusinessRows(filters: ListFilters, db: Db = getDb()): Promise<number> {
   const { sql: where, params } = buildWhere(filters);
-  const row = db.prepare(`SELECT COUNT(*) AS n ${BASE_FROM} ${where}`).get(...params) as { n: number };
-  return row.n;
+  const row = await one<{ n: number }>(db, `SELECT COUNT(*) AS n ${BASE_FROM} ${where}`, params);
+  return row?.n ?? 0;
 }
 
 function mapJoinedRow(row: JoinedRow): LeadRow {
@@ -193,16 +204,13 @@ function mapJoinedRow(row: JoinedRow): LeadRow {
   };
 }
 
-export function getLeadByBusiness(businessId: string, db: Database = getDb()): Lead | null {
-  const row = db.prepare('SELECT * FROM leads WHERE business_id = ?').get(businessId) as
-    | Record<string, never>
-    | undefined;
-  if (!row) return null;
-  return mapLead(row);
+export async function getLeadByBusiness(businessId: string, db: Db = getDb()): Promise<Lead | null> {
+  const row = await one<Record<string, never>>(db, 'SELECT * FROM leads WHERE business_id = $1', [businessId]);
+  return row ? mapLead(row) : null;
 }
 
-export function getLead(leadId: string, db: Database = getDb()): Lead | null {
-  const row = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as Record<string, never> | undefined;
+export async function getLead(leadId: string, db: Db = getDb()): Promise<Lead | null> {
+  const row = await one<Record<string, never>>(db, 'SELECT * FROM leads WHERE id = $1', [leadId]);
   return row ? mapLead(row) : null;
 }
 
@@ -266,18 +274,16 @@ export interface PromoteOptions {
  * businesses are refused unless an admin explicitly overrides, and the override
  * is recorded on the lead itself.
  */
-export function promoteToLead(
+export async function promoteToLead(
   businessId: string,
   userId: string,
   options: PromoteOptions = {},
-  db: Database = getDb(),
-): Lead {
-  const existing = getLeadByBusiness(businessId, db);
+  db: Db = getDb(),
+): Promise<Lead> {
+  const existing = await getLeadByBusiness(businessId, db);
   if (existing) return existing;
 
-  const businessRow = db.prepare('SELECT * FROM businesses WHERE id = ?').get(businessId) as
-    | Record<string, never>
-    | undefined;
+  const businessRow = await one<Record<string, never>>(db, 'SELECT * FROM businesses WHERE id = $1', [businessId]);
   if (!businessRow) throw new Error('Business not found.');
   const business = mapBusiness(businessRow as never);
 
@@ -290,104 +296,106 @@ export function promoteToLead(
   const id = newId('lead');
   const status = options.status ?? 'new';
 
-  const write = db.transaction(() => {
-    db.prepare(
+  await transaction(db, async (tx) => {
+    await run(
+      tx,
       `INSERT INTO leads (id, business_id, status, assigned_user_id, priority, qualification_json,
                           call_count, created_by, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,0,?,?,?)`,
-    ).run(
-      id,
-      businessId,
-      status,
-      options.assignedUserId ?? null,
-      0,
-      JSON.stringify({ ...qualification, overridden: !qualification.qualifies }),
-      userId,
-      now,
-      now,
+       VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,$9)`,
+      [
+        id,
+        businessId,
+        status,
+        options.assignedUserId ?? null,
+        0,
+        JSON.stringify({ ...qualification, overridden: !qualification.qualifies }),
+        userId,
+        now,
+        now,
+      ],
     );
-    db.prepare(
+    await run(
+      tx,
       `INSERT INTO lead_status_history (id, lead_id, from_status, to_status, user_id, note, created_at)
-       VALUES (?,?,?,?,?,?,?)`,
-    ).run(
-      newId('lsh'),
-      id,
-      null,
-      status,
-      userId,
-      qualification.qualifies ? 'Promoted from the research pool.' : 'Promoted with a qualification override.',
-      now,
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        newId('lsh'),
+        id,
+        null,
+        status,
+        userId,
+        qualification.qualifies ? 'Promoted from the research pool.' : 'Promoted with a qualification override.',
+        now,
+      ],
     );
   });
-  write();
 
-  const created = getLead(id, db);
+  const created = await getLead(id, db);
   if (!created) throw new Error('Lead creation failed.');
   return created;
 }
 
-export function removeLead(leadId: string, db: Database = getDb()): void {
-  db.prepare('DELETE FROM leads WHERE id = ?').run(leadId);
+export async function removeLead(leadId: string, db: Db = getDb()): Promise<void> {
+  await run(db, 'DELETE FROM leads WHERE id = $1', [leadId]);
 }
 
-export function updateLeadStatus(
+export async function updateLeadStatus(
   leadId: string,
   status: string,
   userId: string,
   note: string | null = null,
-  db: Database = getDb(),
-): void {
-  const current = getLead(leadId, db);
+  db: Db = getDb(),
+): Promise<void> {
+  const current = await getLead(leadId, db);
   if (!current) throw new Error('Lead not found.');
   const now = Date.now();
-  const write = db.transaction(() => {
-    db.prepare('UPDATE leads SET status = ?, updated_at = ? WHERE id = ?').run(status, now, leadId);
-    db.prepare(
+  await transaction(db, async (tx) => {
+    await run(tx, 'UPDATE leads SET status = $1, updated_at = $2 WHERE id = $3', [status, now, leadId]);
+    await run(
+      tx,
       `INSERT INTO lead_status_history (id, lead_id, from_status, to_status, user_id, note, created_at)
-       VALUES (?,?,?,?,?,?,?)`,
-    ).run(newId('lsh'), leadId, current.status, status, userId, note, now);
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [newId('lsh'), leadId, current.status, status, userId, note, now],
+    );
   });
-  write();
 }
 
-export function assignLead(leadId: string, assignedUserId: string | null, db: Database = getDb()): void {
-  db.prepare('UPDATE leads SET assigned_user_id = ?, updated_at = ? WHERE id = ?').run(
+export async function assignLead(leadId: string, assignedUserId: string | null, db: Db = getDb()): Promise<void> {
+  await run(db, 'UPDATE leads SET assigned_user_id = $1, updated_at = $2 WHERE id = $3', [
     assignedUserId,
     Date.now(),
     leadId,
-  );
+  ]);
 }
 
-export function setCallback(leadId: string, callbackAt: number | null, db: Database = getDb()): void {
-  db.prepare('UPDATE leads SET next_callback_at = ?, updated_at = ? WHERE id = ?').run(
+export async function setCallback(leadId: string, callbackAt: number | null, db: Db = getDb()): Promise<void> {
+  await run(db, 'UPDATE leads SET next_callback_at = $1, updated_at = $2 WHERE id = $3', [
     callbackAt,
     Date.now(),
     leadId,
-  );
+  ]);
 }
 
-export function leadStatusHistory(leadId: string, db: Database = getDb()) {
-  return db
-    .prepare(
-      `SELECT h.id, h.from_status, h.to_status, h.note, h.created_at, u.name AS user_name
-         FROM lead_status_history h
-         LEFT JOIN users u ON u.id = h.user_id
-        WHERE h.lead_id = ? ORDER BY h.created_at DESC`,
-    )
-    .all(leadId) as Array<{
+export async function leadStatusHistory(leadId: string, db: Db = getDb()) {
+  return many<{
     id: string;
     from_status: string | null;
     to_status: string;
     note: string | null;
     created_at: number;
     user_name: string | null;
-  }>;
+  }>(
+    db,
+    `SELECT h.id, h.from_status, h.to_status, h.note, h.created_at, u.name AS user_name
+       FROM lead_status_history h
+       LEFT JOIN users u ON u.id = h.user_id
+      WHERE h.lead_id = $1 ORDER BY h.created_at DESC`,
+    [leadId],
+  );
 }
 
-export function listLeadStatuses(db: Database = getDb()): LeadStatusDefinition[] {
-  const rows = db
-    .prepare('SELECT * FROM lead_statuses WHERE is_active = 1 ORDER BY sort_order')
-    .all() as Array<{
+export async function listLeadStatuses(db: Db = getDb()): Promise<LeadStatusDefinition[]> {
+  const rows = await many<{
     key: string;
     label: string;
     tone: string;
@@ -395,7 +403,7 @@ export function listLeadStatuses(db: Database = getDb()): LeadStatusDefinition[]
     is_active: number;
     is_terminal: number;
     is_callable: number;
-  }>;
+  }>(db, 'SELECT * FROM lead_statuses WHERE is_active = 1 ORDER BY sort_order');
   return rows.map((r) => ({
     key: r.key,
     label: r.label,
@@ -420,58 +428,78 @@ export function listLeadStatuses(db: Database = getDb()): LeadStatusDefinition[]
  * nothing to dial. A lead is never removed from this list by being called; it
  * moves down the order instead.
  */
-export function callingQueue(userId: string, limit = 50, db: Database = getDb()): LeadRow[] {
+export async function callingQueue(userId: string, limit = 50, db: Db = getDb()): Promise<LeadRow[]> {
   const now = Date.now();
-  const rows = db
-    .prepare(
-      `SELECT b.*, l.id AS lead_id, l.status AS lead_status, l.assigned_user_id, u.name AS assigned_user_name,
-              l.priority, l.qualification_json, l.call_count, l.last_call_at, l.last_call_by,
-              l.next_callback_at, l.locked_by, l.locked_at, l.created_by,
-              l.created_at AS lead_created_at, l.updated_at AS lead_updated_at
-       ${BASE_FROM}
-       WHERE l.id IS NOT NULL
-         AND b.excluded_at IS NULL
-         AND b.phone_e164 IS NOT NULL
-         AND s.is_callable = 1
-         AND (l.next_callback_at IS NULL OR l.next_callback_at <= ?)
-       ORDER BY
-         CASE WHEN l.next_callback_at IS NOT NULL AND l.next_callback_at <= ? THEN 0 ELSE 1 END,
-         CASE WHEN l.assigned_user_id = ? THEN 0 WHEN l.assigned_user_id IS NULL THEN 1 ELSE 2 END,
-         l.priority DESC,
-         l.call_count ASC,
-         COALESCE(l.last_call_at, 0) ASC,
-         b.name COLLATE NOCASE ASC
-       LIMIT ?`,
-    )
-    .all(now, now, userId, limit) as JoinedRow[];
+  // $1 (now) is referenced twice — once to filter, once to rank — which
+  // Postgres allows without repeating it in the parameter array.
+  const rows = await many<JoinedRow>(
+    db,
+    `SELECT b.*, l.id AS lead_id, l.status AS lead_status, l.assigned_user_id, u.name AS assigned_user_name,
+            l.priority, l.qualification_json, l.call_count, l.last_call_at, l.last_call_by,
+            l.next_callback_at, l.locked_by, l.locked_at, l.created_by,
+            l.created_at AS lead_created_at, l.updated_at AS lead_updated_at
+     ${BASE_FROM}
+     WHERE l.id IS NOT NULL
+       AND b.excluded_at IS NULL
+       AND b.phone_e164 IS NOT NULL
+       AND s.is_callable = 1
+       AND (l.next_callback_at IS NULL OR l.next_callback_at <= $1)
+     ORDER BY
+       CASE WHEN l.next_callback_at IS NOT NULL AND l.next_callback_at <= $1 THEN 0 ELSE 1 END,
+       CASE WHEN l.assigned_user_id = $2 THEN 0 WHEN l.assigned_user_id IS NULL THEN 1 ELSE 2 END,
+       l.priority DESC,
+       l.call_count ASC,
+       COALESCE(l.last_call_at, 0) ASC,
+       LOWER(b.name) ASC
+     LIMIT $3`,
+    [now, userId, limit],
+  );
   return rows.map(mapJoinedRow);
 }
 
 /** Counts used by the dashboard. */
-export function leadCounts(db: Database = getDb()) {
-  const row = db
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM businesses WHERE excluded_at IS NULL) AS researched,
-         (SELECT COUNT(*) FROM businesses WHERE website_status = 'VERIFIED_NO_WEBSITE' AND identity_status = 'CONFIRMED'
-             AND phone_e164 IS NOT NULL AND excluded_at IS NULL) AS qualified,
-         (SELECT COUNT(*) FROM businesses WHERE website_status IN ('REQUIRES_MANUAL_CHECK','WEBSITE_UNCERTAIN','IDENTITY_UNVERIFIED')
-             AND excluded_at IS NULL) AS manualCheck,
-         (SELECT COUNT(*) FROM leads) AS leads,
-         (SELECT COUNT(*) FROM leads l JOIN lead_statuses s ON s.key = l.status WHERE s.is_callable = 1) AS callable,
-         (SELECT COUNT(*) FROM leads WHERE next_callback_at IS NOT NULL) AS callbacks,
-         (SELECT COUNT(*) FROM leads WHERE status = 'interested') AS interested,
-         (SELECT COUNT(*) FROM leads WHERE status = 'converted') AS converted`,
-    )
-    .get() as {
+export async function leadCounts(db: Db = getDb()) {
+  const row = await one<{
     researched: number;
     qualified: number;
-    manualCheck: number;
+    manualcheck: number;
     leads: number;
     callable: number;
     callbacks: number;
     interested: number;
     converted: number;
+  }>(
+    db,
+    `WITH b AS (
+       SELECT
+         COUNT(*) AS researched,
+         COUNT(CASE WHEN website_status = 'VERIFIED_NO_WEBSITE' AND identity_status = 'CONFIRMED'
+                     AND phone_e164 IS NOT NULL THEN 1 END) AS qualified,
+         COUNT(CASE WHEN website_status IN ('REQUIRES_MANUAL_CHECK','WEBSITE_UNCERTAIN','IDENTITY_UNVERIFIED')
+                    THEN 1 END) AS manualcheck
+       FROM businesses
+       WHERE excluded_at IS NULL
+     ), l AS (
+       SELECT
+         COUNT(*) AS leads,
+         COUNT(CASE WHEN s.is_callable = 1 THEN 1 END) AS callable,
+         COUNT(CASE WHEN lead.next_callback_at IS NOT NULL THEN 1 END) AS callbacks,
+         COUNT(CASE WHEN lead.status = 'interested' THEN 1 END) AS interested,
+         COUNT(CASE WHEN lead.status = 'converted' THEN 1 END) AS converted
+       FROM leads lead
+       LEFT JOIN lead_statuses s ON s.key = lead.status
+     )
+     SELECT b.researched, b.qualified, b.manualcheck, l.leads, l.callable, l.callbacks, l.interested, l.converted
+     FROM b, l`,
+  );
+  return {
+    researched: row?.researched ?? 0,
+    qualified: row?.qualified ?? 0,
+    manualCheck: row?.manualcheck ?? 0,
+    leads: row?.leads ?? 0,
+    callable: row?.callable ?? 0,
+    callbacks: row?.callbacks ?? 0,
+    interested: row?.interested ?? 0,
+    converted: row?.converted ?? 0,
   };
-  return row;
 }

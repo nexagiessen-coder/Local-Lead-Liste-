@@ -30,12 +30,11 @@ export default async function CallPage({
   const params = await searchParams;
   const requested = typeof params.lead === 'string' ? params.lead : undefined;
 
-  const queue = callingQueue(user.id, 50);
+  const [queue, statuses] = await Promise.all([callingQueue(user.id, 50), listLeadStatuses()]);
   const currentIndex = requested ? Math.max(0, queue.findIndex((row) => row.lead?.id === requested)) : 0;
   const current = queue[currentIndex];
   const next = queue[currentIndex + 1];
-  const statuses = listLeadStatuses();
-  const business = current ? getBusiness(current.business.id) : null;
+  const business = current ? await getBusiness(current.business.id) : null;
 
   return (
     <div className="space-y-4">

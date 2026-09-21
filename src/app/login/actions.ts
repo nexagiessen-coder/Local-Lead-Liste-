@@ -35,21 +35,21 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     return { error: `Too many sign-in attempts. Try again in ${retryMinutes} minute(s).` };
   }
 
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   // Always run a hash comparison so a missing account is not detectable by timing.
   const valid = user
     ? await verifyPassword(password, { hash: user.passwordHash, salt: user.passwordSalt })
     : await verifyPassword(password, { hash: 'x'.repeat(88), salt: 'y'.repeat(24) });
 
   if (!user || !valid || !user.isActive) {
-    recordAudit({ userId: user?.id ?? null, action: 'login.failed', entityType: 'user', entityId: user?.id ?? null, detail: { email } });
+    await recordAudit({ userId: user?.id ?? null, action: 'login.failed', entityType: 'user', entityId: user?.id ?? null, detail: { email } });
     return { error: 'That email and password combination did not work.' };
   }
 
-  const session = createSession(user.id, { userAgent: headerList.get('user-agent'), ip });
+  const session = await createSession(user.id, { userAgent: headerList.get('user-agent'), ip });
   const store = await cookies();
   store.set(SESSION_COOKIE, session.token, sessionCookieOptions(session.expiresAt));
-  recordAudit({ userId: user.id, action: 'login.success', entityType: 'user', entityId: user.id });
+  await recordAudit({ userId: user.id, action: 'login.success', entityType: 'user', entityId: user.id });
 
   redirect('/dashboard');
 }
@@ -57,7 +57,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 export async function logoutAction(): Promise<void> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  destroySession(token);
+  await destroySession(token);
   store.delete(SESSION_COOKIE);
   redirect('/login');
 }

@@ -48,7 +48,13 @@ function resolveAppUrl(): string {
 export const env = {
   appUrl: resolveAppUrl(),
   nodeEnv: str('NODE_ENV', 'development')!,
-  databasePath: str('DATABASE_PATH', './data/local-lead-list.sqlite')!,
+  /**
+   * A Postgres connection string (Supabase's "Connection string" from
+   * Settings → Database, direct or pooled). No local-file fallback: the app
+   * has no built-in database of its own — see .env.example for where to find
+   * this value in Supabase.
+   */
+  databaseUrl: str('DATABASE_URL'),
   sessionSecret: str('SESSION_SECRET'),
 
   defaultCountry: (str('DEFAULT_COUNTRY', 'DE') ?? 'DE').toUpperCase(),
@@ -111,6 +117,11 @@ export function assertServerConfig(): void {
   const problems: string[] = [];
   if (!env.sessionSecret || env.sessionSecret.length < 32) {
     problems.push('SESSION_SECRET must be set to at least 32 characters.');
+  }
+  if (!env.databaseUrl) {
+    problems.push(
+      'DATABASE_URL must be set to a Postgres connection string (Supabase → Settings → Database → Connection string).',
+    );
   }
   if (env.discoveryProvider === 'google-places' && !env.googleMapsApiKey) {
     problems.push('DISCOVERY_PROVIDER=google-places requires GOOGLE_MAPS_API_KEY.');

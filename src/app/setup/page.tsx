@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation';
-import { getDb } from '@/lib/db';
+import { getDb, one } from '@/lib/db';
 import { SetupForm } from './setup-form';
 
 export const dynamic = 'force-dynamic';
 
-export default function SetupPage() {
-  const row = getDb().prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number };
-  if (row.n > 0) redirect('/login');
+export default async function SetupPage() {
+  const row = await one<{ n: number }>(getDb(), 'SELECT COUNT(*) AS n FROM users');
+  if ((row?.n ?? 0) > 0) redirect('/login');
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-subtle px-4 py-12">

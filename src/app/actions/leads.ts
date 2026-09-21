@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth/current-user';
-import { getDb } from '@/lib/db';
+import { getDb, one } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/repo/audit';
 import { excludeBusiness, getBusiness, restoreBusiness, setWebsiteStatus, countSources } from '@/lib/repo/businesses';
@@ -51,8 +51,8 @@ export async function promoteBusinessAction(_prev: ActionResult, formData: FormD
   }
 
   try {
-    const lead = promoteToLead(businessId, user.id, { force, assignedUserId: user.id });
-    recordAudit({
+    const lead = await promoteToLead(businessId, user.id, { force, assignedUserId: user.id });
+    await recordAudit({
       userId: user.id,
       action: force ? 'lead.promoted.override' : 'lead.promoted',
       entityType: 'lead',
@@ -70,11 +70,11 @@ export async function promoteBusinessAction(_prev: ActionResult, formData: FormD
 export async function removeLeadAction(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const leadId = String(formData.get('leadId') ?? '');
-  const lead = getLead(leadId);
+  const lead = await getLead(leadId);
   if (!lead) return fail('Lead not found.');
 
-  removeLead(leadId);
-  recordAudit({ userId: user.id, action: 'lead.removed', entityType: 'lead', entityId: leadId, detail: { businessId: lead.businessId } });
+  await removeLead(leadId);
+  await recordAudit({ userId: user.id, action: 'lead.removed', entityType: 'lead', entityId: leadId, detail: { businessId: lead.businessId } });
   refresh();
   return ok('Removed from the lead list. The business stays in the research pool.');
 }
@@ -94,12 +94,14 @@ export async function updateLeadStatusAction(_prev: ActionResult, formData: Form
   });
   if (!parsed.success) return fail('Invalid status change.');
 
-  const exists = getDb().prepare('SELECT 1 FROM lead_statuses WHERE key = ? AND is_active = 1').get(parsed.data.status);
+  const exists = await one(getDb(), 'SELECT 1 FROM lead_statuses WHERE key = $1 AND is_active = 1', [
+    parsed.data.status,
+  ]);
   if (!exists) return fail('Unknown lead status.');
 
   try {
-    updateLeadStatus(parsed.data.leadId, parsed.data.status, user.id, parsed.data.note?.trim() || null);
-    recordAudit({
+    await updateLeadStatus(parsed.data.leadId, parsed.data.status, user.id, parsed.data.note?.trim() || null);
+    await recordAudit({
       userId: user.id,
       action: 'lead.status',
       entityType: 'lead',
@@ -120,12 +122,12 @@ export async function assignLeadAction(_prev: ActionResult, formData: FormData):
   const assignedUserId = raw === '' ? null : raw;
 
   if (assignedUserId) {
-    const exists = getDb().prepare('SELECT 1 FROM users WHERE id = ? AND is_active = 1').get(assignedUserId);
+    const exists = await one(getDb(), 'SELECT 1 FROM users WHERE id = $1 AND is_active = 1', [assignedUserId]);
     if (!exists) return fail('That user does not exist or is not active.');
   }
 
-  assignLead(leadId, assignedUserId);
-  recordAudit({ userId: user.id, action: 'lead.assigned', entityType: 'lead', entityId: leadId, detail: { assignedUserId } });
+  await assignLead(leadId, assignedUserId);
+  await recordAudit({ userId: user.id, action: 'lead.assigned', entityType: 'lead', entityId: leadId, detail: { assignedUserId } });
   refresh();
   return ok(assignedUserId ? 'Lead assigned.' : 'Assignment cleared.');
 }
@@ -137,9 +139,9 @@ export async function addNoteAction(_prev: ActionResult, formData: FormData): Pr
   if (body.length === 0) return fail('The note is empty.');
   if (body.length > 4000) return fail('The note is too long.');
 
-  const lead = getLeadByBusiness(businessId);
-  addNote({ businessId, leadId: lead?.id ?? null, userId: user.id, body });
-  recordAudit({ userId: user.id, action: 'note.added', entityType: 'business', entityId: businessId });
+  const lead = await getLeadByBusiness(businessId);
+  await addNote({ businessId, leadId: lead?.id ?? null, userId: user.id, body });
+  await recordAudit({ userId: user.id, action: 'note.added', entityType: 'business', entityId: businessId });
   refresh();
   return ok('Note saved.');
 }
@@ -149,10 +151,10 @@ export async function excludeBusinessAction(_prev: ActionResult, formData: FormD
   const businessId = String(formData.get('businessId') ?? '');
   const reason = String(formData.get('reason') ?? '').trim() || 'Dismissed by a user.';
 
-  excludeBusiness(businessId, user.id, reason);
-  const lead = getLeadByBusiness(businessId);
-  if (lead) removeLead(lead.id);
-  recordAudit({ userId: user.id, action: 'business.excluded', entityType: 'business', entityId: businessId, detail: { reason } });
+  await excludeBusiness(businessId, user.id, reason);
+  const lead = await getLeadByBusiness(businessId);
+  if (lead) await removeLead(lead.id);
+  await recordAudit({ userId: user.id, action: 'business.excluded', entityType: 'business', entityId: businessId, detail: { reason } });
   refresh();
   return ok('Business excluded. It will not appear in future research results.');
 }
@@ -160,8 +162,8 @@ export async function excludeBusinessAction(_prev: ActionResult, formData: FormD
 export async function restoreBusinessAction(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const businessId = String(formData.get('businessId') ?? '');
-  restoreBusiness(businessId);
-  recordAudit({ userId: user.id, action: 'business.restored', entityType: 'business', entityId: businessId });
+  await restoreBusiness(businessId);
+  await recordAudit({ userId: user.id, action: 'business.restored', entityType: 'business', entityId: businessId });
   refresh();
   return ok('Business restored to the research pool.');
 }
@@ -170,12 +172,14 @@ export async function restoreBusinessAction(_prev: ActionResult, formData: FormD
 export async function reverifyBusinessAction(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const businessId = String(formData.get('businessId') ?? '');
-  const business = getBusiness(businessId);
+  const business = await getBusiness(businessId);
   if (!business) return fail('Business not found.');
 
-  const sourceRow = getDb()
-    .prepare('SELECT raw_json FROM business_sources WHERE business_id = ? ORDER BY fetched_at DESC LIMIT 1')
-    .get(businessId) as { raw_json: string | null } | undefined;
+  const sourceRow = await one<{ raw_json: string | null }>(
+    getDb(),
+    'SELECT raw_json FROM business_sources WHERE business_id = $1 ORDER BY fetched_at DESC LIMIT 1',
+    [businessId],
+  );
   const raw = sourceRow?.raw_json ? (JSON.parse(sourceRow.raw_json) as Partial<RawBusinessCandidate>) : {};
 
   const identity = buildIdentity(
@@ -203,7 +207,7 @@ export async function reverifyBusinessAction(_prev: ActionResult, formData: Form
       raw: {},
       isDemoData: business.isDemoData,
     },
-    { defaultCountry: env.defaultCountry, corroboratingSources: countSources(businessId) },
+    { defaultCountry: env.defaultCountry, corroboratingSources: await countSources(businessId) },
   );
   identity.status = business.identityStatus;
   identity.confidence = business.identityConfidence;
@@ -217,14 +221,14 @@ export async function reverifyBusinessAction(_prev: ActionResult, formData: Form
       search: providers.search,
       fetcher: providers.fetcher,
     });
-    persistVerification({ businessId, result, triggeredBy: user.id, runId: null });
-    setWebsiteStatus(businessId, {
+    await persistVerification({ businessId, result, triggeredBy: user.id, runId: null });
+    await setWebsiteStatus(businessId, {
       status: result.status,
       confidence: result.confidence,
       url: result.acceptedUrl,
       checkedAt: result.finishedAt,
     });
-    recordAudit({
+    await recordAudit({
       userId: user.id,
       action: 'business.reverified',
       entityType: 'business',
@@ -260,14 +264,14 @@ export async function manualWebsiteStatusAction(_prev: ActionResult, formData: F
   });
   if (!parsed.success) return fail('Invalid manual verification.');
 
-  const business = getBusiness(parsed.data.businessId);
+  const business = await getBusiness(parsed.data.businessId);
   if (!business) return fail('Business not found.');
   if (parsed.data.status === 'VERIFIED_WEBSITE' && !parsed.data.url?.trim()) {
     return fail('Enter the website address you verified.');
   }
 
   const now = Date.now();
-  persistVerification({
+  await persistVerification({
     businessId: parsed.data.businessId,
     triggeredBy: user.id,
     runId: null,
@@ -293,13 +297,13 @@ export async function manualWebsiteStatusAction(_prev: ActionResult, formData: F
       engineVersion: 'manual/1',
     },
   });
-  setWebsiteStatus(parsed.data.businessId, {
+  await setWebsiteStatus(parsed.data.businessId, {
     status: parsed.data.status,
     confidence: 100,
     url: parsed.data.url?.trim() || null,
     checkedAt: now,
   });
-  recordAudit({
+  await recordAudit({
     userId: user.id,
     action: 'business.manual_verification',
     entityType: 'business',
@@ -343,7 +347,7 @@ export async function recordCallOutcomeAction(_prev: ActionResult, formData: For
   const duration = parsed.data.durationSeconds ? Number.parseInt(parsed.data.durationSeconds, 10) : null;
 
   try {
-    recordCallOutcome({
+    await recordCallOutcome({
       callId: parsed.data.callId,
       outcome: parsed.data.outcome,
       note: parsed.data.note?.trim() || null,
@@ -352,9 +356,9 @@ export async function recordCallOutcomeAction(_prev: ActionResult, formData: For
     });
     if (parsed.data.leadStatus) {
       const leadId = String(formData.get('leadId') ?? '');
-      if (leadId) updateLeadStatus(leadId, parsed.data.leadStatus, user.id, parsed.data.note?.trim() || null);
+      if (leadId) await updateLeadStatus(leadId, parsed.data.leadStatus, user.id, parsed.data.note?.trim() || null);
     }
-    recordAudit({ userId: user.id, action: 'call.outcome', entityType: 'call', entityId: parsed.data.callId, detail: { outcome: parsed.data.outcome } });
+    await recordAudit({ userId: user.id, action: 'call.outcome', entityType: 'call', entityId: parsed.data.callId, detail: { outcome: parsed.data.outcome } });
     refresh();
     return ok('Call outcome saved.');
   } catch (error) {
@@ -367,13 +371,13 @@ export async function setCallbackAction(_prev: ActionResult, formData: FormData)
   const leadId = String(formData.get('leadId') ?? '');
   const raw = String(formData.get('callbackAt') ?? '').trim();
   if (raw === '') {
-    setCallback(leadId, null);
+    await setCallback(leadId, null);
     refresh();
     return ok('Callback cleared.');
   }
   const ts = Date.parse(raw);
   if (!Number.isFinite(ts)) return fail('The callback date could not be read.');
-  setCallback(leadId, ts);
+  await setCallback(leadId, ts);
   refresh();
   return ok('Callback scheduled.');
 }

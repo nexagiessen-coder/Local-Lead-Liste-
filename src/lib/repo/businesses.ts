@@ -1,12 +1,11 @@
-import type { Database } from 'better-sqlite3';
-import { getDb } from '@/lib/db';
+import { getDb, many, one, run, type Db } from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { boundingBox, distanceKm } from '@/lib/normalize/geo';
 import { branchGroupKey, type ResolvedIdentity } from '@/lib/identity/identity';
 import type { MatchCandidate } from '@/lib/identity/dedupe';
 import type { Business, IdentityStatus, OpeningHours, WebsiteStatus } from '@/lib/types';
 
-/** Row shape as stored in SQLite. */
+/** Row shape as stored in Postgres. */
 interface BusinessRow {
   id: string;
   name: string;
@@ -95,8 +94,8 @@ export function mapBusiness(row: BusinessRow): Business {
 
 const SELECT_BUSINESS = 'SELECT * FROM businesses';
 
-export function getBusiness(id: string, db: Database = getDb()): Business | null {
-  const row = db.prepare(`${SELECT_BUSINESS} WHERE id = ?`).get(id) as BusinessRow | undefined;
+export async function getBusiness(id: string, db: Db = getDb()): Promise<Business | null> {
+  const row = await one<BusinessRow>(db, `${SELECT_BUSINESS} WHERE id = $1`, [id]);
   return row ? mapBusiness(row) : null;
 }
 
@@ -106,10 +105,13 @@ export function getBusiness(id: string, db: Database = getDb()): Business | null
  * Pre-filters on the strong keys (phone, address) plus a geographic box and a
  * normalised-name lookup, so the matcher only sees plausible rows.
  */
-export function findMatchCandidates(identity: ResolvedIdentity, db: Database = getDb()): MatchCandidate[] {
+export async function findMatchCandidates(
+  identity: ResolvedIdentity,
+  db: Db = getDb(),
+): Promise<MatchCandidate[]> {
   const found = new Map<string, MatchCandidate>();
-  const add = (rows: unknown[]) => {
-    for (const raw of rows as BusinessRow[]) {
+  const add = (rows: BusinessRow[]) => {
+    for (const raw of rows) {
       found.set(raw.id, {
         id: raw.id,
         name: raw.name,
@@ -124,20 +126,26 @@ export function findMatchCandidates(identity: ResolvedIdentity, db: Database = g
   };
 
   if (identity.dedupeKeyPhone) {
-    add(db.prepare(`${SELECT_BUSINESS} WHERE dedupe_key_phone = ?`).all(identity.dedupeKeyPhone));
+    add(await many<BusinessRow>(db, `${SELECT_BUSINESS} WHERE dedupe_key_phone = $1`, [identity.dedupeKeyPhone]));
   }
   if (identity.dedupeKeyAddress) {
-    add(db.prepare(`${SELECT_BUSINESS} WHERE dedupe_key_address = ?`).all(identity.dedupeKeyAddress));
+    add(
+      await many<BusinessRow>(db, `${SELECT_BUSINESS} WHERE dedupe_key_address = $1`, [
+        identity.dedupeKeyAddress,
+      ]),
+    );
   }
   if (identity.nameNormalized) {
-    add(db.prepare(`${SELECT_BUSINESS} WHERE name_normalized = ?`).all(identity.nameNormalized));
+    add(await many<BusinessRow>(db, `${SELECT_BUSINESS} WHERE name_normalized = $1`, [identity.nameNormalized]));
   }
   if (identity.lat !== null && identity.lon !== null) {
     const box = boundingBox({ lat: identity.lat, lon: identity.lon }, 0.25);
     add(
-      db
-        .prepare(`${SELECT_BUSINESS} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`)
-        .all(box.minLat, box.maxLat, box.minLon, box.maxLon),
+      await many<BusinessRow>(
+        db,
+        `${SELECT_BUSINESS} WHERE lat BETWEEN $1 AND $2 AND lon BETWEEN $3 AND $4`,
+        [box.minLat, box.maxLat, box.minLon, box.maxLon],
+      ),
     );
   }
   return [...found.values()];
@@ -154,12 +162,13 @@ export interface InsertBusinessInput {
   runId: string | null;
 }
 
-export function insertBusiness(input: InsertBusinessInput, db: Database = getDb()): string {
+export async function insertBusiness(input: InsertBusinessInput, db: Db = getDb()): Promise<string> {
   const now = Date.now();
   const id = newId('biz');
   const { identity } = input;
 
-  db.prepare(
+  await run(
+    db,
     `INSERT INTO businesses (
        id, name, name_normalized, category, category_label,
        street, house_number, postal_code, city, city_normalized, region, country_code,
@@ -168,42 +177,43 @@ export function insertBusiness(input: InsertBusinessInput, db: Database = getDb(
        identity_status, identity_confidence, identity_signals_json,
        website_status, branch_group_key, dedupe_key_phone, dedupe_key_address,
        is_demo_data, first_seen_at, last_seen_at, discovered_in_run, created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  ).run(
-    id,
-    identity.name,
-    identity.nameNormalized,
-    input.category,
-    input.categoryLabel,
-    identity.street,
-    identity.houseNumber,
-    identity.postalCode,
-    identity.city,
-    identity.cityNormalized,
-    identity.region,
-    identity.countryCode,
-    identity.lat,
-    identity.lon,
-    identity.phoneRaw,
-    identity.phoneE164,
-    identity.email,
-    input.timezone,
-    input.openingHours ? JSON.stringify(input.openingHours) : null,
-    input.openingHoursSource,
-    input.openingHours ? now : null,
-    identity.status,
-    identity.confidence,
-    JSON.stringify(identity.signals),
-    'NOT_CHECKED',
-    branchGroupKey(identity.name, identity.countryCode),
-    identity.dedupeKeyPhone,
-    identity.dedupeKeyAddress,
-    input.isDemoData ? 1 : 0,
-    now,
-    now,
-    input.runId,
-    now,
-    now,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)`,
+    [
+      id,
+      identity.name,
+      identity.nameNormalized,
+      input.category,
+      input.categoryLabel,
+      identity.street,
+      identity.houseNumber,
+      identity.postalCode,
+      identity.city,
+      identity.cityNormalized,
+      identity.region,
+      identity.countryCode,
+      identity.lat,
+      identity.lon,
+      identity.phoneRaw,
+      identity.phoneE164,
+      identity.email,
+      input.timezone,
+      input.openingHours ? JSON.stringify(input.openingHours) : null,
+      input.openingHoursSource,
+      input.openingHours ? now : null,
+      identity.status,
+      identity.confidence,
+      JSON.stringify(identity.signals),
+      'NOT_CHECKED',
+      branchGroupKey(identity.name, identity.countryCode),
+      identity.dedupeKeyPhone,
+      identity.dedupeKeyAddress,
+      input.isDemoData ? 1 : 0,
+      now,
+      now,
+      input.runId,
+      now,
+      now,
+    ],
   );
   return id;
 }
@@ -215,13 +225,13 @@ export function insertBusiness(input: InsertBusinessInput, db: Database = getDb(
  * is already present with a conflicting one, because a conflict is a signal
  * that needs review rather than a silent update.
  */
-export function refreshBusiness(
+export async function refreshBusiness(
   businessId: string,
   identity: ResolvedIdentity,
   extra: { openingHours: OpeningHours | null; openingHoursSource: string | null; corroborated: boolean },
-  db: Database = getDb(),
-): { conflicts: string[] } {
-  const existing = getBusiness(businessId, db);
+  db: Db = getDb(),
+): Promise<{ conflicts: string[] }> {
+  const existing = await getBusiness(businessId, db);
   if (!existing) return { conflicts: [] };
   const now = Date.now();
   const conflicts: string[] = [];
@@ -229,11 +239,7 @@ export function refreshBusiness(
   if (existing.phoneE164 && identity.phoneE164 && existing.phoneE164 !== identity.phoneE164) {
     conflicts.push(`Phone differs between sources: ${existing.phoneE164} vs ${identity.phoneE164}.`);
   }
-  if (
-    existing.postalCode &&
-    identity.postalCode &&
-    existing.postalCode !== identity.postalCode
-  ) {
+  if (existing.postalCode && identity.postalCode && existing.postalCode !== identity.postalCode) {
     conflicts.push(`Postal code differs between sources: ${existing.postalCode} vs ${identity.postalCode}.`);
   }
 
@@ -276,99 +282,114 @@ export function refreshBusiness(
     if (confidence >= 70) updates.identity_status = 'CONFIRMED';
   }
 
-  const assignments = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
-  db.prepare(`UPDATE businesses SET ${assignments} WHERE id = ?`).run(...Object.values(updates), businessId);
+  const keys = Object.keys(updates);
+  const assignments = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+  await run(db, `UPDATE businesses SET ${assignments} WHERE id = $${keys.length + 1}`, [
+    ...Object.values(updates),
+    businessId,
+  ]);
   return { conflicts };
 }
 
-export function recordSource(
+export async function recordSource(
   businessId: string,
   source: { provider: string; externalId: string; sourceUrl: string | null; raw: unknown },
-  db: Database = getDb(),
-): void {
-  db.prepare(
+  db: Db = getDb(),
+): Promise<void> {
+  await run(
+    db,
     `INSERT INTO business_sources (id, business_id, provider, external_id, source_url, raw_json, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (provider, external_id) DO UPDATE SET
-       business_id = excluded.business_id,
-       raw_json = excluded.raw_json,
-       fetched_at = excluded.fetched_at`,
-  ).run(
-    newId('src'),
-    businessId,
-    source.provider,
-    source.externalId,
-    source.sourceUrl,
-    JSON.stringify(source.raw),
-    Date.now(),
+       business_id = EXCLUDED.business_id,
+       raw_json = EXCLUDED.raw_json,
+       fetched_at = EXCLUDED.fetched_at`,
+    [newId('src'), businessId, source.provider, source.externalId, source.sourceUrl, JSON.stringify(source.raw), Date.now()],
   );
 }
 
-export function findBusinessBySource(
+export async function findBusinessBySource(
   provider: string,
   externalId: string,
-  db: Database = getDb(),
-): string | null {
-  const row = db
-    .prepare('SELECT business_id FROM business_sources WHERE provider = ? AND external_id = ?')
-    .get(provider, externalId) as { business_id: string } | undefined;
+  db: Db = getDb(),
+): Promise<string | null> {
+  const row = await one<{ business_id: string }>(
+    db,
+    'SELECT business_id FROM business_sources WHERE provider = $1 AND external_id = $2',
+    [provider, externalId],
+  );
   return row?.business_id ?? null;
 }
 
-export function countSources(businessId: string, db: Database = getDb()): number {
-  const row = db
-    .prepare('SELECT COUNT(DISTINCT provider) AS n FROM business_sources WHERE business_id = ?')
-    .get(businessId) as { n: number };
-  return row.n;
+export async function countSources(businessId: string, db: Db = getDb()): Promise<number> {
+  const row = await one<{ n: number }>(
+    db,
+    'SELECT COUNT(DISTINCT provider) AS n FROM business_sources WHERE business_id = $1',
+    [businessId],
+  );
+  return row?.n ?? 0;
 }
 
-export function setWebsiteStatus(
+export async function setWebsiteStatus(
   businessId: string,
   update: { status: WebsiteStatus; confidence: number; url: string | null; checkedAt: number },
-  db: Database = getDb(),
-): void {
-  db.prepare(
+  db: Db = getDb(),
+): Promise<void> {
+  await run(
+    db,
     `UPDATE businesses
-        SET website_status = ?, website_confidence = ?, website_url = ?, website_checked_at = ?, updated_at = ?
-      WHERE id = ?`,
-  ).run(update.status, update.confidence, update.url, update.checkedAt, Date.now(), businessId);
+        SET website_status = $1, website_confidence = $2, website_url = $3, website_checked_at = $4, updated_at = $5
+      WHERE id = $6`,
+    [update.status, update.confidence, update.url, update.checkedAt, Date.now(), businessId],
+  );
 }
 
-export function setIdentityStatus(
+export async function setIdentityStatus(
   businessId: string,
   status: IdentityStatus,
   confidence: number,
-  db: Database = getDb(),
-): void {
-  db.prepare('UPDATE businesses SET identity_status = ?, identity_confidence = ?, updated_at = ? WHERE id = ?')
-    .run(status, confidence, Date.now(), businessId);
+  db: Db = getDb(),
+): Promise<void> {
+  await run(
+    db,
+    'UPDATE businesses SET identity_status = $1, identity_confidence = $2, updated_at = $3 WHERE id = $4',
+    [status, confidence, Date.now(), businessId],
+  );
 }
 
-export function excludeBusiness(
+export async function excludeBusiness(
   businessId: string,
   userId: string,
   reason: string,
-  db: Database = getDb(),
-): void {
-  db.prepare('UPDATE businesses SET excluded_at = ?, excluded_by = ?, exclusion_reason = ?, updated_at = ? WHERE id = ?')
-    .run(Date.now(), userId, reason, Date.now(), businessId);
+  db: Db = getDb(),
+): Promise<void> {
+  await run(
+    db,
+    'UPDATE businesses SET excluded_at = $1, excluded_by = $2, exclusion_reason = $3, updated_at = $4 WHERE id = $5',
+    [Date.now(), userId, reason, Date.now(), businessId],
+  );
 }
 
-export function restoreBusiness(businessId: string, db: Database = getDb()): void {
-  db.prepare('UPDATE businesses SET excluded_at = NULL, excluded_by = NULL, exclusion_reason = NULL, updated_at = ? WHERE id = ?')
-    .run(Date.now(), businessId);
+export async function restoreBusiness(businessId: string, db: Db = getDb()): Promise<void> {
+  await run(
+    db,
+    'UPDATE businesses SET excluded_at = NULL, excluded_by = NULL, exclusion_reason = NULL, updated_at = $1 WHERE id = $2',
+    [Date.now(), businessId],
+  );
 }
 
 /** Businesses near a point, used by the quick-list novelty check. */
-export function businessesWithinRadius(
+export async function businessesWithinRadius(
   center: { lat: number; lon: number },
   radiusKm: number,
-  db: Database = getDb(),
-): Business[] {
+  db: Db = getDb(),
+): Promise<Business[]> {
   const box = boundingBox(center, radiusKm);
-  const rows = db
-    .prepare(`${SELECT_BUSINESS} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`)
-    .all(box.minLat, box.maxLat, box.minLon, box.maxLon) as BusinessRow[];
+  const rows = await many<BusinessRow>(
+    db,
+    `${SELECT_BUSINESS} WHERE lat BETWEEN $1 AND $2 AND lon BETWEEN $3 AND $4`,
+    [box.minLat, box.maxLat, box.minLon, box.maxLon],
+  );
   return rows
     .map(mapBusiness)
     .filter((b) => b.lat !== null && b.lon !== null && distanceKm(center, { lat: b.lat, lon: b.lon }) <= radiusKm);

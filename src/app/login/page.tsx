@@ -1,17 +1,17 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/current-user';
-import { getDb } from '@/lib/db';
+import { getDb, one } from '@/lib/db';
 import { LoginForm } from './login-form';
 
 export const dynamic = 'force-dynamic';
 
-function hasAnyUser(): boolean {
-  const row = getDb().prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number };
-  return row.n > 0;
+async function hasAnyUser(): Promise<boolean> {
+  const row = await one<{ n: number }>(getDb(), 'SELECT COUNT(*) AS n FROM users');
+  return (row?.n ?? 0) > 0;
 }
 
 export default async function LoginPage() {
-  if (!hasAnyUser()) redirect('/setup');
+  if (!(await hasAnyUser())) redirect('/setup');
   const user = await getCurrentUser();
   if (user) redirect('/dashboard');
 

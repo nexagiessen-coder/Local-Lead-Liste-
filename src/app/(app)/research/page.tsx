@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export default async function ResearchPage() {
   await requireUser();
   const providers = describeProviders();
-  const runs = listRuns(10);
+  const runs = await listRuns(10);
 
   return (
     <div className="space-y-6">

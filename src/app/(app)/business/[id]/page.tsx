@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function BusinessPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const business = getBusiness(id);
+  const business = await getBusiness(id);
   if (!business) notFound();
 
   return (

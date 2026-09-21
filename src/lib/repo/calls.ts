@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3';
-import { getDb } from '@/lib/db';
+import { getDb, many, one, run, transaction, type Db } from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { DAY } from '@/lib/time';
 import type { CallAttempt } from '@/lib/types';
@@ -19,24 +18,27 @@ export interface RecordCallInput {
   phoneE164: string | null;
 }
 
-export function startCall(input: RecordCallInput, db: Database = getDb()): CallAttempt {
+export async function startCall(input: RecordCallInput, db: Db = getDb()): Promise<CallAttempt> {
   const now = Date.now();
   const id = newId('call');
 
-  const write = db.transaction(() => {
-    db.prepare(
+  await transaction(db, async (tx) => {
+    await run(
+      tx,
       `INSERT INTO call_attempts (id, lead_id, business_id, user_id, phone_e164, started_at, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?)`,
-    ).run(id, input.leadId, input.businessId, input.userId, input.phoneE164, now, now, now);
-    db.prepare(
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, input.leadId, input.businessId, input.userId, input.phoneE164, now, now, now],
+    );
+    await run(
+      tx,
       `UPDATE leads
-          SET call_count = call_count + 1, last_call_at = ?, last_call_by = ?, updated_at = ?
-        WHERE id = ?`,
-    ).run(now, input.userId, now, input.leadId);
+          SET call_count = call_count + 1, last_call_at = $1, last_call_by = $2, updated_at = $3
+        WHERE id = $4`,
+      [now, input.userId, now, input.leadId],
+    );
   });
-  write();
 
-  const created = getCall(id, db);
+  const created = await getCall(id, db);
   if (!created) throw new Error('Call could not be recorded.');
   return created;
 }
@@ -49,46 +51,45 @@ export interface CallOutcomeInput {
   durationSeconds: number | null;
 }
 
-export function recordCallOutcome(input: CallOutcomeInput, db: Database = getDb()): void {
+export async function recordCallOutcome(input: CallOutcomeInput, db: Db = getDb()): Promise<void> {
   const now = Date.now();
-  const call = getCall(input.callId, db);
+  const call = await getCall(input.callId, db);
   if (!call) throw new Error('Call attempt not found.');
 
-  const write = db.transaction(() => {
-    db.prepare(
+  await transaction(db, async (tx) => {
+    await run(
+      tx,
       `UPDATE call_attempts
-          SET outcome = ?, note = ?, callback_at = ?, duration_seconds = ?, updated_at = ?
-        WHERE id = ?`,
-    ).run(input.outcome, input.note, input.callbackAt, input.durationSeconds, now, input.callId);
+          SET outcome = $1, note = $2, callback_at = $3, duration_seconds = $4, updated_at = $5
+        WHERE id = $6`,
+      [input.outcome, input.note, input.callbackAt, input.durationSeconds, now, input.callId],
+    );
     if (input.callbackAt !== null) {
-      db.prepare('UPDATE leads SET next_callback_at = ?, updated_at = ? WHERE id = ?').run(
+      await run(tx, 'UPDATE leads SET next_callback_at = $1, updated_at = $2 WHERE id = $3', [
         input.callbackAt,
         now,
         call.leadId,
-      );
+      ]);
     }
   });
-  write();
 }
 
-export function getCall(id: string, db: Database = getDb()): CallAttempt | null {
-  const row = db.prepare('SELECT * FROM call_attempts WHERE id = ?').get(id) as
-    | {
-        id: string;
-        lead_id: string;
-        business_id: string;
-        user_id: string;
-        phone_e164: string | null;
-        started_at: number;
-        outcome: string | null;
-        note: string | null;
-        callback_at: number | null;
-        duration_seconds: number | null;
-        created_at: number;
-        updated_at: number;
-      }
-    | undefined;
-  if (!row) return null;
+interface CallRow {
+  id: string;
+  lead_id: string;
+  business_id: string;
+  user_id: string;
+  phone_e164: string | null;
+  started_at: number;
+  outcome: string | null;
+  note: string | null;
+  callback_at: number | null;
+  duration_seconds: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+function mapCall(row: CallRow): CallAttempt {
   return {
     id: row.id,
     leadId: row.lead_id,
@@ -105,59 +106,33 @@ export function getCall(id: string, db: Database = getDb()): CallAttempt | null 
   };
 }
 
+export async function getCall(id: string, db: Db = getDb()): Promise<CallAttempt | null> {
+  const row = await one<CallRow>(db, 'SELECT * FROM call_attempts WHERE id = $1', [id]);
+  return row ? mapCall(row) : null;
+}
+
 export interface CallHistoryEntry extends CallAttempt {
   userName: string | null;
 }
 
-export function callHistory(businessId: string, db: Database = getDb()): CallHistoryEntry[] {
-  const rows = db
-    .prepare(
-      `SELECT c.*, u.name AS user_name
-         FROM call_attempts c
-         LEFT JOIN users u ON u.id = c.user_id
-        WHERE c.business_id = ?
-        ORDER BY c.started_at DESC`,
-    )
-    .all(businessId) as Array<Record<string, never>>;
-  return rows.map((row) => {
-    const r = row as unknown as {
-      id: string;
-      lead_id: string;
-      business_id: string;
-      user_id: string;
-      phone_e164: string | null;
-      started_at: number;
-      outcome: string | null;
-      note: string | null;
-      callback_at: number | null;
-      duration_seconds: number | null;
-      created_at: number;
-      updated_at: number;
-      user_name: string | null;
-    };
-    return {
-      id: r.id,
-      leadId: r.lead_id,
-      businessId: r.business_id,
-      userId: r.user_id,
-      phoneE164: r.phone_e164,
-      startedAt: r.started_at,
-      outcome: r.outcome,
-      note: r.note,
-      callbackAt: r.callback_at,
-      durationSeconds: r.duration_seconds,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-      userName: r.user_name,
-    };
-  });
+export async function callHistory(businessId: string, db: Db = getDb()): Promise<CallHistoryEntry[]> {
+  const rows = await many<CallRow & { user_name: string | null }>(
+    db,
+    `SELECT c.*, u.name AS user_name
+       FROM call_attempts c
+       LEFT JOIN users u ON u.id = c.user_id
+      WHERE c.business_id = $1
+      ORDER BY c.started_at DESC`,
+    [businessId],
+  );
+  return rows.map((r) => ({ ...mapCall(r), userName: r.user_name }));
 }
 
-export function callsSince(since: number, db: Database = getDb()): number {
-  const row = db.prepare('SELECT COUNT(*) AS n FROM call_attempts WHERE started_at >= ?').get(since) as {
-    n: number;
-  };
-  return row.n;
+export async function callsSince(since: number, db: Db = getDb()): Promise<number> {
+  const row = await one<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM call_attempts WHERE started_at >= $1', [
+    since,
+  ]);
+  return row?.n ?? 0;
 }
 
 export interface TeamActivityRow {
@@ -168,24 +143,40 @@ export interface TeamActivityRow {
   leadsAssigned: number;
 }
 
-export function teamActivity(db: Database = getDb()): TeamActivityRow[] {
+export async function teamActivity(db: Db = getDb()): Promise<TeamActivityRow[]> {
   const dayAgo = Date.now() - DAY;
   const weekAgo = Date.now() - 7 * DAY;
-  const rows = db
-    .prepare(
-      `SELECT u.id AS user_id, u.name AS user_name,
-              (SELECT COUNT(*) FROM call_attempts c WHERE c.user_id = u.id AND c.started_at >= ?) AS calls_today,
-              (SELECT COUNT(*) FROM call_attempts c WHERE c.user_id = u.id AND c.started_at >= ?) AS calls_week,
-              (SELECT COUNT(*) FROM leads l WHERE l.assigned_user_id = u.id) AS leads_assigned
-         FROM users u WHERE u.is_active = 1 ORDER BY u.name COLLATE NOCASE`,
-    )
-    .all(dayAgo, weekAgo) as Array<{
+  const rows = await many<{
     user_id: string;
     user_name: string;
     calls_today: number;
     calls_week: number;
     leads_assigned: number;
-  }>;
+  }>(
+    db,
+    `WITH call_stats AS (
+       SELECT user_id,
+              COUNT(CASE WHEN started_at >= $1 THEN 1 END) AS calls_today,
+              COUNT(CASE WHEN started_at >= $2 THEN 1 END) AS calls_week
+       FROM call_attempts
+       GROUP BY user_id
+     ), lead_stats AS (
+       SELECT assigned_user_id AS user_id, COUNT(*) AS leads_assigned
+       FROM leads
+       WHERE assigned_user_id IS NOT NULL
+       GROUP BY assigned_user_id
+     )
+     SELECT u.id AS user_id, u.name AS user_name,
+            COALESCE(cs.calls_today, 0) AS calls_today,
+            COALESCE(cs.calls_week, 0) AS calls_week,
+            COALESCE(ls.leads_assigned, 0) AS leads_assigned
+       FROM users u
+       LEFT JOIN call_stats cs ON cs.user_id = u.id
+       LEFT JOIN lead_stats ls ON ls.user_id = u.id
+      WHERE u.is_active = 1
+      ORDER BY LOWER(u.name)`,
+    [dayAgo, weekAgo],
+  );
   return rows.map((r) => ({
     userId: r.user_id,
     userName: r.user_name,

@@ -37,15 +37,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
 
-  const lead = getLead(parsed.leadId);
+  const lead = await getLead(parsed.leadId);
   if (!lead) return NextResponse.json({ error: 'Lead not found.' }, { status: 404 });
-  const business = getBusiness(lead.businessId);
+  const business = await getBusiness(lead.businessId);
   if (!business) return NextResponse.json({ error: 'Business not found.' }, { status: 404 });
   if (!business.phoneE164) {
     return NextResponse.json({ error: 'This business has no verified phone number.' }, { status: 400 });
   }
 
-  const call = startCall({
+  const call = await startCall({
     leadId: lead.id,
     businessId: lead.businessId,
     userId: user.id,
@@ -55,10 +55,10 @@ export async function POST(request: Request) {
   // Moving off "new"/"ready to call" reflects that an attempt was made. The
   // lead itself stays exactly where it was in every list.
   if (lead.status === 'new' || lead.status === 'ready_to_call') {
-    updateLeadStatus(lead.id, 'called', user.id, 'Call started.');
+    await updateLeadStatus(lead.id, 'called', user.id, 'Call started.');
   }
 
-  recordAudit({
+  await recordAudit({
     userId: user.id,
     action: 'call.started',
     entityType: 'lead',

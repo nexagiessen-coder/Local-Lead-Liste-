@@ -23,10 +23,13 @@ export default async function LeadsPage({
   const params = await searchParams;
   const query = parseListQuery('leads', params);
 
-  const rows = applyOpenNow(listBusinessRows(query.filters), query.openNow);
-  const total = countBusinessRows(query.filters);
-  const statuses = listLeadStatuses();
-  const users = listUsers(false);
+  const [businessRows, total, statuses, users] = await Promise.all([
+    listBusinessRows(query.filters),
+    countBusinessRows(query.filters),
+    listLeadStatuses(),
+    listUsers(false),
+  ]);
+  const rows = applyOpenNow(businessRows, query.openNow);
 
   return (
     <div className="space-y-4">

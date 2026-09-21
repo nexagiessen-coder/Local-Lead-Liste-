@@ -40,12 +40,12 @@ export function isRunning(runId: string): boolean {
 }
 
 /** Creates the run row, kicks off the pipeline, and returns the id immediately. */
-export function startResearch(request: ResearchRequest): { runId: string } {
+export async function startResearch(request: ResearchRequest): Promise<{ runId: string }> {
   const existing = activeRunFor(request.userId);
   if (existing) throw new ResearchBusyError(existing);
 
   const providers = createProviderSet();
-  const runId = createRun({
+  const runId = await createRun({
     createdBy: request.userId,
     queryText: request.queryText ?? null,
     locationLabel: request.locationQuery,
@@ -58,8 +58,8 @@ export function startResearch(request: ResearchRequest): { runId: string } {
   });
 
   const work = runResearch({ ...request, runId }, providers)
-    .then((outcome) => {
-      recordAudit({
+    .then(async (outcome) => {
+      await recordAudit({
         userId: request.userId,
         action: 'research.completed',
         entityType: 'research_run',
@@ -68,11 +68,11 @@ export function startResearch(request: ResearchRequest): { runId: string } {
       });
       return outcome;
     })
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      const run = getRun(runId);
+      const run = await getRun(runId);
       if (run && run.status === 'running') {
-        finishRun(runId, 'failed', run.stats ?? EMPTY_STATS, message);
+        await finishRun(runId, 'failed', run.stats ?? EMPTY_STATS, message);
       }
       throw error;
     })

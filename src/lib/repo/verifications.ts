@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3';
-import { getDb } from '@/lib/db';
+import { getDb, many, one, run, transaction, type Db } from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { DAY } from '@/lib/time';
 import type {
@@ -20,78 +19,81 @@ export interface PersistVerificationInput {
 }
 
 /** Stores a verification run with its candidates and evidence, atomically. */
-export function persistVerification(input: PersistVerificationInput, db: Database = getDb()): string {
+export async function persistVerification(input: PersistVerificationInput, db: Db = getDb()): Promise<string> {
   const id = newId('ver');
   const { result } = input;
 
-  const write = db.transaction(() => {
-    db.prepare(
+  await transaction(db, async (tx) => {
+    await run(
+      tx,
       `INSERT INTO website_verifications
          (id, business_id, status, confidence, accepted_url, channels_json, summary,
           engine_version, triggered_by, run_id, started_at, finished_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      id,
-      input.businessId,
-      result.status,
-      result.confidence,
-      result.acceptedUrl,
-      JSON.stringify(result.channels),
-      result.summary,
-      result.engineVersion,
-      input.triggeredBy,
-      input.runId,
-      result.startedAt,
-      result.finishedAt,
-    );
-
-    const candidateStmt = db.prepare(
-      `INSERT INTO website_candidates
-         (id, verification_id, business_id, url, final_url, domain, source_channel,
-          score, decision, decision_reason, signals_json, http_status, fetched_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    );
-    for (const candidate of result.candidates) {
-      candidateStmt.run(
-        newId('cnd'),
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
         id,
         input.businessId,
-        candidate.url,
-        candidate.finalUrl,
-        candidate.domain,
-        candidate.sourceChannel,
-        candidate.score,
-        candidate.decision,
-        candidate.decisionReason,
-        JSON.stringify(candidate.signals),
-        candidate.httpStatus,
-        candidate.fetchedAt,
+        result.status,
+        result.confidence,
+        result.acceptedUrl,
+        JSON.stringify(result.channels),
+        result.summary,
+        result.engineVersion,
+        input.triggeredBy,
+        input.runId,
+        result.startedAt,
+        result.finishedAt,
+      ],
+    );
+
+    for (const candidate of result.candidates) {
+      await run(
+        tx,
+        `INSERT INTO website_candidates
+           (id, verification_id, business_id, url, final_url, domain, source_channel,
+            score, decision, decision_reason, signals_json, http_status, fetched_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          newId('cnd'),
+          id,
+          input.businessId,
+          candidate.url,
+          candidate.finalUrl,
+          candidate.domain,
+          candidate.sourceChannel,
+          candidate.score,
+          candidate.decision,
+          candidate.decisionReason,
+          JSON.stringify(candidate.signals),
+          candidate.httpStatus,
+          candidate.fetchedAt,
+        ],
       );
     }
 
-    const evidenceStmt = db.prepare(
-      `INSERT INTO verification_evidence
-         (id, verification_id, business_id, kind, statement, detail, source_label, source_url, stance, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    );
     const now = Date.now();
     for (const item of result.evidence) {
-      evidenceStmt.run(
-        newId('evd'),
-        id,
-        input.businessId,
-        item.kind,
-        item.statement,
-        item.detail,
-        item.sourceLabel,
-        item.sourceUrl,
-        item.stance,
-        now,
+      await run(
+        tx,
+        `INSERT INTO verification_evidence
+           (id, verification_id, business_id, kind, statement, detail, source_label, source_url, stance, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          newId('evd'),
+          id,
+          input.businessId,
+          item.kind,
+          item.statement,
+          item.detail,
+          item.sourceLabel,
+          item.sourceUrl,
+          item.stance,
+          now,
+        ],
       );
     }
   });
 
-  write();
   return id;
 }
 
@@ -111,18 +113,18 @@ interface VerificationRow {
 }
 
 /** The most recent verification for a business, with candidates and evidence. */
-export function getLatestVerification(
+export async function getLatestVerification(
   businessId: string,
-  db: Database = getDb(),
-): WebsiteVerification | null {
-  const row = db
-    .prepare('SELECT * FROM website_verifications WHERE business_id = ? ORDER BY finished_at DESC LIMIT 1')
-    .get(businessId) as VerificationRow | undefined;
+  db: Db = getDb(),
+): Promise<WebsiteVerification | null> {
+  const row = await one<VerificationRow>(
+    db,
+    'SELECT * FROM website_verifications WHERE business_id = $1 ORDER BY finished_at DESC LIMIT 1',
+    [businessId],
+  );
   if (!row) return null;
 
-  const candidates = db
-    .prepare('SELECT * FROM website_candidates WHERE verification_id = ? ORDER BY score DESC')
-    .all(row.id) as Array<{
+  const candidates = await many<{
     url: string;
     final_url: string | null;
     domain: string;
@@ -133,11 +135,14 @@ export function getLatestVerification(
     signals_json: string | null;
     http_status: number | null;
     fetched_at: number | null;
-  }>;
+  }>(db, 'SELECT * FROM website_candidates WHERE verification_id = $1 ORDER BY score DESC', [row.id]);
 
-  const evidence = db
-    .prepare('SELECT * FROM verification_evidence WHERE verification_id = ? ORDER BY rowid')
-    .all(row.id) as Array<{
+  // `seq` is a BIGSERIAL — insertion order. Every evidence item in one
+  // verification run shares the same `created_at` millisecond, so a
+  // physical sequence column (rather than the timestamp, or the
+  // insertion-order-agnostic random id) is what actually preserves the
+  // order the evidence was written in.
+  const evidence = await many<{
     id: string;
     kind: string;
     statement: string;
@@ -146,7 +151,7 @@ export function getLatestVerification(
     source_url: string | null;
     stance: string;
     created_at: number;
-  }>;
+  }>(db, 'SELECT * FROM verification_evidence WHERE verification_id = $1 ORDER BY seq', [row.id]);
 
   return {
     id: row.id,
@@ -190,20 +195,20 @@ export function getLatestVerification(
   };
 }
 
-export function verificationHistory(businessId: string, db: Database = getDb()) {
-  return db
-    .prepare(
-      `SELECT id, status, confidence, accepted_url, summary, finished_at
-         FROM website_verifications WHERE business_id = ? ORDER BY finished_at DESC LIMIT 20`,
-    )
-    .all(businessId) as Array<{
+export async function verificationHistory(businessId: string, db: Db = getDb()) {
+  return many<{
     id: string;
     status: string;
     confidence: number;
     accepted_url: string | null;
     summary: string | null;
     finished_at: number;
-  }>;
+  }>(
+    db,
+    `SELECT id, status, confidence, accepted_url, summary, finished_at
+       FROM website_verifications WHERE business_id = $1 ORDER BY finished_at DESC LIMIT 20`,
+    [businessId],
+  );
 }
 
 /** True when the stored verification is old enough to be worth re-running. */

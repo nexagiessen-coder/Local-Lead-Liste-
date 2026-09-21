@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { runId } = startResearch({
+    const { runId } = await startResearch({
       locationQuery: parsed.location,
       radiusKm: parsed.radiusKm,
       category: parsed.category,

@@ -1,5 +1,15 @@
--- NEXA Leads — initial schema.
--- All timestamps are unix epoch milliseconds (UTC).
+-- NEXA Leads — initial schema (PostgreSQL / Supabase dialect).
+--
+-- Translated from the original SQLite schema. All timestamps are unix epoch
+-- milliseconds (UTC), stored as BIGINT — SQLite's INTEGER silently holds a
+-- 64-bit value, but Postgres's INTEGER is 32-bit and would overflow a
+-- 13-digit millisecond timestamp (current values are already ~1.79e12).
+-- Every other INTEGER column (scores, counts, 0/1 flags, pixel dimensions,
+-- HTTP status codes) stays within 32-bit range and is left as INTEGER.
+--
+-- Boolean flags (is_active, is_demo_data, is_terminal, is_callable, …) are
+-- kept as INTEGER 0/1 rather than native BOOLEAN, so the application code's
+-- `=== 1` / `? 1 : 0` comparisons work unchanged.
 
 CREATE TABLE users (
   id             TEXT PRIMARY KEY,
@@ -9,18 +19,18 @@ CREATE TABLE users (
   password_hash  TEXT NOT NULL,
   password_salt  TEXT NOT NULL,
   is_active      INTEGER NOT NULL DEFAULT 1,
-  created_at     INTEGER NOT NULL,
-  updated_at     INTEGER NOT NULL,
-  last_login_at  INTEGER
+  created_at     BIGINT NOT NULL,
+  updated_at     BIGINT NOT NULL,
+  last_login_at  BIGINT
 );
 CREATE UNIQUE INDEX idx_users_email ON users (email);
 
 CREATE TABLE sessions (
   id           TEXT PRIMARY KEY,              -- sha256 hash of the session token
   user_id      TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-  created_at   INTEGER NOT NULL,
-  expires_at   INTEGER NOT NULL,
-  last_seen_at INTEGER NOT NULL,
+  created_at   BIGINT NOT NULL,
+  expires_at   BIGINT NOT NULL,
+  last_seen_at BIGINT NOT NULL,
   user_agent   TEXT,
   ip           TEXT
 );
@@ -41,15 +51,15 @@ CREATE TABLE businesses (
   city_normalized           TEXT,
   region                    TEXT,
   country_code              TEXT,
-  lat                       REAL,
-  lon                       REAL,
+  lat                       DOUBLE PRECISION,
+  lon                       DOUBLE PRECISION,
   phone_raw                 TEXT,
   phone_e164                TEXT,
   email                     TEXT,
   timezone                  TEXT,
   opening_hours_json        TEXT,
   opening_hours_source      TEXT,
-  opening_hours_verified_at INTEGER,
+  opening_hours_verified_at BIGINT,
   identity_status           TEXT NOT NULL DEFAULT 'UNVERIFIED'
                               CHECK (identity_status IN ('CONFIRMED','PROBABLE','UNVERIFIED','NEEDS_REVIEW')),
   identity_confidence       INTEGER NOT NULL DEFAULT 0,
@@ -61,19 +71,19 @@ CREATE TABLE businesses (
                                 'IDENTITY_UNVERIFIED')),
   website_confidence        INTEGER,
   website_url               TEXT,
-  website_checked_at        INTEGER,
+  website_checked_at        BIGINT,
   branch_group_key          TEXT,
   dedupe_key_phone          TEXT,
   dedupe_key_address        TEXT,
   is_demo_data              INTEGER NOT NULL DEFAULT 0,
-  first_seen_at             INTEGER NOT NULL,
-  last_seen_at              INTEGER NOT NULL,
+  first_seen_at             BIGINT NOT NULL,
+  last_seen_at              BIGINT NOT NULL,
   discovered_in_run         TEXT,
-  excluded_at               INTEGER,
+  excluded_at               BIGINT,
   excluded_by               TEXT REFERENCES users (id) ON DELETE SET NULL,
   exclusion_reason          TEXT,
-  created_at                INTEGER NOT NULL,
-  updated_at                INTEGER NOT NULL
+  created_at                BIGINT NOT NULL,
+  updated_at                BIGINT NOT NULL
 );
 CREATE INDEX idx_businesses_phone ON businesses (dedupe_key_phone);
 CREATE INDEX idx_businesses_address ON businesses (dedupe_key_address);
@@ -91,7 +101,7 @@ CREATE TABLE business_sources (
   external_id  TEXT NOT NULL,
   source_url   TEXT,
   raw_json     TEXT,
-  fetched_at   INTEGER NOT NULL,
+  fetched_at   BIGINT NOT NULL,
   UNIQUE (provider, external_id)
 );
 CREATE INDEX idx_business_sources_business ON business_sources (business_id);
@@ -106,7 +116,7 @@ CREATE TABLE business_photos (
   width                INTEGER,
   height               INTEGER,
   link_basis           TEXT NOT NULL,   -- how we know the photo belongs to this business
-  fetched_at           INTEGER NOT NULL,
+  fetched_at           BIGINT NOT NULL,
   UNIQUE (business_id, provider, provider_ref)
 );
 
@@ -122,8 +132,8 @@ CREATE TABLE website_verifications (
   engine_version TEXT NOT NULL,
   triggered_by   TEXT REFERENCES users (id) ON DELETE SET NULL,
   run_id         TEXT,
-  started_at     INTEGER NOT NULL,
-  finished_at    INTEGER NOT NULL
+  started_at     BIGINT NOT NULL,
+  finished_at    BIGINT NOT NULL
 );
 CREATE INDEX idx_verifications_business ON website_verifications (business_id, finished_at DESC);
 
@@ -141,12 +151,16 @@ CREATE TABLE website_candidates (
   decision_reason TEXT NOT NULL,
   signals_json    TEXT,
   http_status     INTEGER,
-  fetched_at      INTEGER
+  fetched_at      BIGINT
 );
 CREATE INDEX idx_candidates_verification ON website_candidates (verification_id);
 
 -- Atomic, human-readable evidence items.
 CREATE TABLE verification_evidence (
+  -- Insertion order within one verification run: every item in a run shares
+  -- the same created_at millisecond, so this (not created_at, not the
+  -- random id) is what preserves display order.
+  seq             BIGSERIAL,
   id              TEXT PRIMARY KEY,
   verification_id TEXT NOT NULL REFERENCES website_verifications (id) ON DELETE CASCADE,
   business_id     TEXT NOT NULL REFERENCES businesses (id) ON DELETE CASCADE,
@@ -156,7 +170,7 @@ CREATE TABLE verification_evidence (
   source_label    TEXT,
   source_url      TEXT,
   stance          TEXT NOT NULL CHECK (stance IN ('supports','contradicts','neutral')),
-  created_at      INTEGER NOT NULL
+  created_at      BIGINT NOT NULL
 );
 CREATE INDEX idx_evidence_verification ON verification_evidence (verification_id);
 CREATE INDEX idx_evidence_business ON verification_evidence (business_id);
@@ -181,14 +195,14 @@ CREATE TABLE leads (
   priority           INTEGER NOT NULL DEFAULT 0,
   qualification_json TEXT,
   call_count         INTEGER NOT NULL DEFAULT 0,
-  last_call_at       INTEGER,
+  last_call_at       BIGINT,
   last_call_by       TEXT REFERENCES users (id) ON DELETE SET NULL,
-  next_callback_at   INTEGER,
+  next_callback_at   BIGINT,
   locked_by          TEXT REFERENCES users (id) ON DELETE SET NULL,
-  locked_at          INTEGER,
+  locked_at          BIGINT,
   created_by         TEXT REFERENCES users (id) ON DELETE SET NULL,
-  created_at         INTEGER NOT NULL,
-  updated_at         INTEGER NOT NULL
+  created_at         BIGINT NOT NULL,
+  updated_at         BIGINT NOT NULL
 );
 CREATE INDEX idx_leads_status ON leads (status);
 CREATE INDEX idx_leads_assigned ON leads (assigned_user_id);
@@ -201,7 +215,7 @@ CREATE TABLE lead_status_history (
   to_status   TEXT NOT NULL,
   user_id     TEXT REFERENCES users (id) ON DELETE SET NULL,
   note        TEXT,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 CREATE INDEX idx_lead_history_lead ON lead_status_history (lead_id, created_at DESC);
 
@@ -211,13 +225,13 @@ CREATE TABLE call_attempts (
   business_id      TEXT NOT NULL REFERENCES businesses (id) ON DELETE CASCADE,
   user_id          TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   phone_e164       TEXT,
-  started_at       INTEGER NOT NULL,
+  started_at       BIGINT NOT NULL,
   outcome          TEXT,
   note             TEXT,
-  callback_at      INTEGER,
+  callback_at      BIGINT,
   duration_seconds INTEGER,
-  created_at       INTEGER NOT NULL,
-  updated_at       INTEGER NOT NULL
+  created_at       BIGINT NOT NULL,
+  updated_at       BIGINT NOT NULL
 );
 CREATE INDEX idx_calls_lead ON call_attempts (lead_id, started_at DESC);
 CREATE INDEX idx_calls_user ON call_attempts (user_id, started_at DESC);
@@ -228,7 +242,7 @@ CREATE TABLE notes (
   lead_id     TEXT REFERENCES leads (id) ON DELETE SET NULL,
   user_id     TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   body        TEXT NOT NULL,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 CREATE INDEX idx_notes_business ON notes (business_id, created_at DESC);
 
@@ -237,17 +251,17 @@ CREATE TABLE research_runs (
   created_by      TEXT REFERENCES users (id) ON DELETE SET NULL,
   query_text      TEXT,
   location_label  TEXT NOT NULL,
-  center_lat      REAL,
-  center_lon      REAL,
-  radius_km       REAL NOT NULL,
+  center_lat      DOUBLE PRECISION,
+  center_lon      DOUBLE PRECISION,
+  radius_km       DOUBLE PRECISION NOT NULL,
   category        TEXT,
   requested_count INTEGER NOT NULL,
   provider        TEXT NOT NULL,
   status          TEXT NOT NULL CHECK (status IN ('running','completed','failed','partial')),
   stats_json      TEXT,
   error           TEXT,
-  started_at      INTEGER NOT NULL,
-  finished_at     INTEGER
+  started_at      BIGINT NOT NULL,
+  finished_at     BIGINT
 );
 CREATE INDEX idx_runs_started ON research_runs (started_at DESC);
 
@@ -258,7 +272,7 @@ CREATE TABLE research_run_items (
   raw_name    TEXT NOT NULL,
   outcome     TEXT NOT NULL,      -- new | duplicate | refreshed | excluded | needs_review | rejected
   reason      TEXT,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 CREATE INDEX idx_run_items_run ON research_run_items (run_id);
 
@@ -269,7 +283,7 @@ CREATE TABLE audit_log (
   entity_type TEXT NOT NULL,
   entity_id   TEXT,
   detail_json TEXT,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 CREATE INDEX idx_audit_created ON audit_log (created_at DESC);
 CREATE INDEX idx_audit_entity ON audit_log (entity_type, entity_id);
@@ -277,15 +291,15 @@ CREATE INDEX idx_audit_entity ON audit_log (entity_type, entity_id);
 CREATE TABLE app_settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at BIGINT NOT NULL
 );
 
 -- Cached geocoding results, so the same location is not looked up twice.
 CREATE TABLE geocode_cache (
-  query      TEXT PRIMARY KEY,
-  provider   TEXT NOT NULL,
+  query       TEXT PRIMARY KEY,
+  provider    TEXT NOT NULL,
   result_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 
 INSERT INTO lead_statuses (key, label, tone, sort_order, is_active, is_terminal, is_callable) VALUES

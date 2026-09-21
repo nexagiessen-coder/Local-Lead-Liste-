@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3';
-import { getDb } from '@/lib/db';
+import { getDb, one, type Db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { buildIdentity } from '@/lib/identity/identity';
 import { matchExistingBusiness } from '@/lib/identity/dedupe';
@@ -70,26 +69,26 @@ const MAX_VERIFICATIONS_PER_RUN = 60;
 export async function geocodeLocation(
   query: string,
   providers: ProviderSet,
-  db: Database = getDb(),
+  db: Db = getDb(),
 ): Promise<GeocodeResult | null> {
-  const cached = getCachedGeocode(query, db) as GeocodeResult | null;
+  const cached = (await getCachedGeocode(query, db)) as GeocodeResult | null;
   if (cached) return cached;
   const result = await providers.geocoding.geocode(query);
-  if (result) cacheGeocode(query, providers.geocoding.info.id, result, db);
+  if (result) await cacheGeocode(query, providers.geocoding.info.id, result, db);
   return result;
 }
 
 export async function runResearch(
   request: ResearchRequest,
   providers: ProviderSet,
-  db: Database = getDb(),
+  db: Db = getDb(),
 ): Promise<ResearchOutcome> {
   const stats: ResearchRunStats = { ...EMPTY_STATS };
 
   // The run row exists before any network call, so the UI can poll immediately.
   const runId =
     request.runId ??
-    createRun(
+    (await createRun(
       {
         createdBy: request.userId,
         queryText: request.queryText ?? null,
@@ -102,24 +101,24 @@ export async function runResearch(
         provider: providers.discovery.info.id,
       },
       db,
-    );
+    ));
 
   let location: GeocodeResult | null;
   try {
     location = await geocodeLocation(request.locationQuery, providers, db);
   } catch (error) {
     const message = error instanceof ProviderError ? error.message : String(error);
-    finishRun(runId, 'failed', stats, `Location lookup failed: ${message}`, db);
+    await finishRun(runId, 'failed', stats, `Location lookup failed: ${message}`, db);
     return { runId, stats, status: 'failed', error: `Location lookup failed: ${message}`, locationLabel: request.locationQuery };
   }
 
   if (!location) {
     const message = `Could not find a location called "${request.locationQuery}". Try a city name, or a city and country.`;
-    finishRun(runId, 'failed', stats, message, db);
+    await finishRun(runId, 'failed', stats, message, db);
     return { runId, stats, status: 'failed', error: message, locationLabel: request.locationQuery };
   }
 
-  updateRunLocation(runId, { label: location.label, lat: location.lat, lon: location.lon }, db);
+  await updateRunLocation(runId, { label: location.label, lat: location.lat, lon: location.lon }, db);
 
   // --- Stage 1: discovery --------------------------------------------------
   let discovered: RawBusinessCandidate[];
@@ -133,12 +132,12 @@ export async function runResearch(
     });
   } catch (error) {
     const message = error instanceof ProviderError ? error.message : String(error);
-    finishRun(runId, 'failed', stats, `Discovery failed: ${message}`, db);
+    await finishRun(runId, 'failed', stats, `Discovery failed: ${message}`, db);
     return { runId, stats, status: 'failed', error: `Discovery failed: ${message}`, locationLabel: location.label };
   }
 
   stats.discovered = discovered.length;
-  updateRunStats(runId, stats, db);
+  await updateRunStats(runId, stats, db);
 
   // --- Stage 2 & 3: identity and deduplication -----------------------------
   const newBusinessIds: string[] = [];
@@ -149,14 +148,14 @@ export async function runResearch(
 
     if (!identity.name) {
       stats.excluded += 1;
-      recordRunItem({ runId, businessId: null, rawName: raw.name, outcome: 'rejected', reason: 'No usable business name.' }, db);
+      await recordRunItem({ runId, businessId: null, rawName: raw.name, outcome: 'rejected', reason: 'No usable business name.' }, db);
       continue;
     }
 
     // Same provider record seen before → refresh, never duplicate.
-    const knownFromSource = findBusinessBySource(raw.provider, raw.externalId, db);
+    const knownFromSource = await findBusinessBySource(raw.provider, raw.externalId, db);
     if (knownFromSource) {
-      const { conflicts } = refreshBusiness(
+      const { conflicts } = await refreshBusiness(
         knownFromSource,
         identity,
         { openingHours: raw.openingHours, openingHoursSource: raw.provider, corroborated: false },
@@ -164,7 +163,7 @@ export async function runResearch(
       );
       stats.refreshed += 1;
       if (conflicts.length > 0) stats.needsReview += 1;
-      recordRunItem(
+      await recordRunItem(
         { runId, businessId: knownFromSource, rawName: raw.name, outcome: 'refreshed', reason: 'Already known from this source.' },
         db,
       );
@@ -172,11 +171,11 @@ export async function runResearch(
       continue;
     }
 
-    const match = matchExistingBusiness(identity, findMatchCandidates(identity, db));
+    const match = matchExistingBusiness(identity, await findMatchCandidates(identity, db));
 
     if (match.kind === 'same' && match.businessId) {
-      const sources = countSources(match.businessId, db);
-      const { conflicts } = refreshBusiness(
+      const sources = await countSources(match.businessId, db);
+      const { conflicts } = await refreshBusiness(
         match.businessId,
         identity,
         {
@@ -186,16 +185,16 @@ export async function runResearch(
         },
         db,
       );
-      recordSource(match.businessId, raw, db);
+      await recordSource(match.businessId, raw, db);
       stats.duplicates += 1;
       if (conflicts.length > 0) {
         stats.needsReview += 1;
-        recordRunItem(
+        await recordRunItem(
           { runId, businessId: match.businessId, rawName: raw.name, outcome: 'needs_review', reason: `${match.reason} ${conflicts.join(' ')}` },
           db,
         );
       } else {
-        recordRunItem({ runId, businessId: match.businessId, rawName: raw.name, outcome: 'duplicate', reason: match.reason }, db);
+        await recordRunItem({ runId, businessId: match.businessId, rawName: raw.name, outcome: 'duplicate', reason: match.reason }, db);
       }
       if (!request.onlyNew) touchedBusinessIds.push(match.businessId);
       continue;
@@ -203,7 +202,7 @@ export async function runResearch(
 
     // 'review' and 'branch' both create a separate business: two businesses are
     // never merged on a name alone.
-    const businessId = insertBusiness(
+    const businessId = await insertBusiness(
       {
         identity,
         category: raw.category ?? request.category,
@@ -216,15 +215,15 @@ export async function runResearch(
       },
       db,
     );
-    recordSource(businessId, raw, db);
+    await recordSource(businessId, raw, db);
 
     if (match.kind === 'review') {
-      setIdentityStatus(businessId, 'NEEDS_REVIEW', identity.confidence, db);
+      await setIdentityStatus(businessId, 'NEEDS_REVIEW', identity.confidence, db);
       stats.needsReview += 1;
-      recordRunItem({ runId, businessId, rawName: raw.name, outcome: 'needs_review', reason: match.reason }, db);
+      await recordRunItem({ runId, businessId, rawName: raw.name, outcome: 'needs_review', reason: match.reason }, db);
     } else {
       stats.newBusinesses += 1;
-      recordRunItem(
+      await recordRunItem(
         {
           runId,
           businessId,
@@ -238,7 +237,7 @@ export async function runResearch(
     newBusinessIds.push(businessId);
   }
 
-  updateRunStats(runId, stats, db);
+  await updateRunStats(runId, stats, db);
 
   // --- Stage 4: website verification ---------------------------------------
   const verificationQueue = request.onlyNew
@@ -249,13 +248,15 @@ export async function runResearch(
   for (const businessId of verificationQueue.slice(0, MAX_VERIFICATIONS_PER_RUN)) {
     if (stats.qualified >= request.desiredCount && request.onlyNew) break;
 
-    const business = getBusiness(businessId, db);
+    const business = await getBusiness(businessId, db);
     if (!business) continue;
     if (!isVerificationStale(business.websiteCheckedAt, env.verificationTtlDays)) continue;
 
-    const rawSource = db
-      .prepare('SELECT raw_json FROM business_sources WHERE business_id = ? ORDER BY fetched_at DESC LIMIT 1')
-      .get(businessId) as { raw_json: string | null } | undefined;
+    const rawSource = await one<{ raw_json: string | null }>(
+      db,
+      'SELECT raw_json FROM business_sources WHERE business_id = $1 ORDER BY fetched_at DESC LIMIT 1',
+      [businessId],
+    );
     const raw = rawSource?.raw_json
       ? (JSON.parse(rawSource.raw_json) as Partial<RawBusinessCandidate>)
       : {};
@@ -285,7 +286,7 @@ export async function runResearch(
         raw: {},
         isDemoData: business.isDemoData,
       },
-      { defaultCountry: env.defaultCountry, corroboratingSources: countSources(businessId, db) },
+      { defaultCountry: env.defaultCountry, corroboratingSources: await countSources(businessId, db) },
     );
     // The stored identity status (which may be NEEDS_REVIEW) wins.
     identity.status = business.identityStatus;
@@ -299,8 +300,8 @@ export async function runResearch(
         search: providers.search,
         fetcher: providers.fetcher,
       });
-      persistVerification({ businessId, result, triggeredBy: request.userId, runId }, db);
-      setWebsiteStatus(
+      await persistVerification({ businessId, result, triggeredBy: request.userId, runId }, db);
+      await setWebsiteStatus(
         businessId,
         {
           status: result.status,
@@ -312,28 +313,28 @@ export async function runResearch(
       );
       stats.verified += 1;
 
-      const updated = getBusiness(businessId, db);
+      const updated = await getBusiness(businessId, db);
       if (updated && qualifyBusiness(updated).qualifies) stats.qualified += 1;
     } catch (error) {
       verificationErrors += 1;
       stats.verificationFailures += 1;
       const message = error instanceof ProviderError ? error.message : String(error);
       // A failed verification must never leave a business looking "checked".
-      setWebsiteStatus(
+      await setWebsiteStatus(
         businessId,
         { status: 'REQUIRES_MANUAL_CHECK', confidence: 0, url: null, checkedAt: Date.now() },
         db,
       );
-      recordRunItem(
+      await recordRunItem(
         { runId, businessId, rawName: business.name, outcome: 'needs_review', reason: `Verification failed: ${message}` },
         db,
       );
     }
-    updateRunStats(runId, stats, db);
+    await updateRunStats(runId, stats, db);
   }
 
   const status = verificationErrors > 0 ? 'partial' : 'completed';
-  finishRun(
+  await finishRun(
     runId,
     status,
     stats,

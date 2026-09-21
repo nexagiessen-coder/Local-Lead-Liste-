@@ -7,7 +7,7 @@ import { listNotes } from '@/lib/repo/notes';
 import { getLatestVerification, verificationHistory } from '@/lib/repo/verifications';
 import { listUsers } from '@/lib/repo/users';
 import { qualifyBusiness } from '@/lib/qualification/qualify';
-import { getDb } from '@/lib/db';
+import { getDb, many } from '@/lib/db';
 import type { Business, User } from '@/lib/types';
 import { Alert, Badge, Card, Value, buttonSecondary } from './ui';
 import { DemoBadge, IdentityBadge, WebsiteStatusBadge } from './status';
@@ -25,19 +25,24 @@ import { PromoteControls } from './promote-controls';
  * the website status.
  */
 export async function BusinessDetail({ business, user }: { business: Business; user: User }) {
-  const lead = getLeadByBusiness(business.id);
-  const verification = getLatestVerification(business.id);
-  const history = verificationHistory(business.id);
-  const calls = callHistory(business.id);
-  const notes = listNotes(business.id);
-  const statuses = listLeadStatuses();
-  const users = listUsers(false).map((u) => ({ id: u.id, name: u.name }));
+  const [lead, verification, history, calls, notes, statuses, rawUsers, photos, sources] = await Promise.all([
+    getLeadByBusiness(business.id),
+    getLatestVerification(business.id),
+    verificationHistory(business.id),
+    callHistory(business.id),
+    listNotes(business.id),
+    listLeadStatuses(),
+    listUsers(false),
+    getBusinessPhotos(business.id),
+    many<{ provider: string; external_id: string; source_url: string | null; fetched_at: number }>(
+      getDb(),
+      'SELECT provider, external_id, source_url, fetched_at FROM business_sources WHERE business_id = $1 ORDER BY fetched_at DESC',
+      [business.id],
+    ),
+  ]);
+  const users = rawUsers.map((u) => ({ id: u.id, name: u.name }));
   const qualification = qualifyBusiness(business);
-  const photos = await getBusinessPhotos(business.id);
   const openCall = calls.find((call) => call.outcome === null && call.userId === user.id);
-  const sources = getDb()
-    .prepare('SELECT provider, external_id, source_url, fetched_at FROM business_sources WHERE business_id = ? ORDER BY fetched_at DESC')
-    .all(business.id) as Array<{ provider: string; external_id: string; source_url: string | null; fetched_at: number }>;
 
   return (
     <div className="space-y-4">
@@ -366,8 +371,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function LeadHistory({ leadId }: { leadId: string }) {
-  const history = leadStatusHistory(leadId);
+async function LeadHistory({ leadId }: { leadId: string }) {
+  const history = await leadStatusHistory(leadId);
   if (history.length === 0) return null;
   return (
     <details className="text-xs text-ink-soft">

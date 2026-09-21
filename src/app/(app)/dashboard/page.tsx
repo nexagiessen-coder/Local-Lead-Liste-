@@ -17,13 +17,15 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const counts = leadCounts();
-  const callsToday = callsSince(Date.now() - DAY);
-  const queue = callingQueue(user.id, 10);
-  const team = teamActivity();
-  const activity = recentActivity(12);
-  const runs = listRuns(3);
-  const statuses = listLeadStatuses();
+  const [counts, callsToday, queue, team, activity, runs, statuses] = await Promise.all([
+    leadCounts(),
+    callsSince(Date.now() - DAY),
+    callingQueue(user.id, 10),
+    teamActivity(),
+    recentActivity(12),
+    listRuns(3),
+    listLeadStatuses(),
+  ]);
   const providers = describeProviders();
 
   return (
