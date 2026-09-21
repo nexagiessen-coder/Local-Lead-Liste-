@@ -50,6 +50,11 @@ to compile successfully against Hostinger's exact build image.
    `postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`
 3. That's the whole setup — no need to run migrations or create tables by
    hand; the app does that itself on first request.
+4. Optional but recommended: in the Supabase SQL Editor, paste in and run
+   [`src/lib/db/security/enable_rls.sql`](../../src/lib/db/security/enable_rls.sql)
+   from this repository. It closes Supabase's public REST API for these
+   tables — which this app never uses — without affecting the app itself;
+   see the comment at the top of that file.
 
 ## What to verify once you're in hPanel (genuinely unknown from here)
 

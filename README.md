@@ -104,6 +104,15 @@ project specifically — create a free one at [supabase.com](https://supabase.co
 can't reach it). That single `DATABASE_URL` is the only thing every option
 below needs from you.
 
+Also worth doing once, in the Supabase SQL Editor: paste in
+[`src/lib/db/security/enable_rls.sql`](src/lib/db/security/enable_rls.sql)
+and run it. It turns on Row Level Security with no policies, which closes
+Supabase's public REST API for these tables (something this app never uses)
+without affecting the app itself in any way — see the comment at the top of
+that file for why. It isn't run automatically by `npm run db:migrate`,
+because it's Supabase-specific and has nothing to do with the app's own
+schema.
+
 Because the database is no longer a local file, the app itself is stateless
 and needs no persistent disk. What it still needs:
 
