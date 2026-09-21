@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth/current-user';
 import { MAX_ACTIVE_USERS, countActiveUsers, listUsers } from '@/lib/repo/users';
 import { listLeadStatuses } from '@/lib/repo/leads';
 import { describeProviders } from '@/lib/providers/registry';
+import { currentMonthlyUsage } from '@/lib/repo/provider-usage';
 import { publicConfig } from '@/lib/env';
 import { MIN_IDENTITY_CONFIDENCE, MIN_WEBSITE_CONFIDENCE } from '@/lib/qualification/qualify';
 import { ACCEPT_THRESHOLD, PROBABLE_THRESHOLD } from '@/lib/website/score';
@@ -21,6 +22,9 @@ export default async function SettingsPage() {
     listLeadStatuses(),
   ]);
   const providers = describeProviders();
+  const searchUsage = publicConfig.webSearchMonthlyLimit
+    ? await currentMonthlyUsage(publicConfig.webSearchProvider)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -73,6 +77,12 @@ export default async function SettingsPage() {
           <Threshold label="Identity confidence required to qualify" value={`${MIN_IDENTITY_CONFIDENCE}/100 and status “confirmed”`} />
           <Threshold label="Website confidence required to qualify" value={`${MIN_WEBSITE_CONFIDENCE}/100`} />
           <Threshold label="Verification considered stale after" value={`${publicConfig.verificationTtlDays} days`} />
+          {publicConfig.webSearchMonthlyLimit && (
+            <Threshold
+              label="Search calls this month"
+              value={`${searchUsage ?? 0} / ${publicConfig.webSearchMonthlyLimit} — search channel stops (goes to manual check) once reached`}
+            />
+          )}
           <Threshold label="Default country / timezone" value={`${publicConfig.defaultCountry} · ${publicConfig.defaultTimezone}`} />
         </dl>
       </Card>

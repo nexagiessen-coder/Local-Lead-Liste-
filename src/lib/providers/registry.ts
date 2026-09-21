@@ -9,6 +9,7 @@ import { BraveWebSearchProvider } from './search/brave';
 import { GoogleCseWebSearchProvider } from './search/google-cse';
 import { NoWebSearchProvider } from './search/none';
 import { FixtureWebSearchProvider } from './search/fixture';
+import { LimitedWebSearchProvider } from './search/limited';
 import { SafeHttpFetcher } from './http/fetcher';
 import { FixtureHttpFetcher } from './http/fixture';
 import { GooglePlacesPhotoProvider, NoPhotoProvider } from './photos/google-places';
@@ -60,14 +61,19 @@ export function createDiscoveryProvider(): DiscoveryProvider {
 export function createWebSearchProvider(): WebSearchProvider {
   switch (env.webSearchProvider) {
     case 'brave':
-      return new BraveWebSearchProvider();
+      return withMonthlyLimit(new BraveWebSearchProvider());
     case 'google-cse':
-      return new GoogleCseWebSearchProvider();
+      return withMonthlyLimit(new GoogleCseWebSearchProvider());
     default:
       // In demo mode the offline index stands in for a real engine so the
       // pipeline can be exercised; otherwise search is genuinely unavailable.
       return env.discoveryProvider === 'fixture' ? new FixtureWebSearchProvider() : new NoWebSearchProvider();
   }
+}
+
+/** Applies WEB_SEARCH_MONTHLY_LIMIT, when configured, to a real (billable) search provider. */
+function withMonthlyLimit(provider: WebSearchProvider): WebSearchProvider {
+  return env.webSearchMonthlyLimit ? new LimitedWebSearchProvider(provider, env.webSearchMonthlyLimit) : provider;
 }
 
 export function createHttpFetcher(): HttpFetcher {

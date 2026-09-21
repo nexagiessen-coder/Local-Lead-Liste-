@@ -39,6 +39,7 @@ ALTER TABLE "public"."research_run_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."audit_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."app_settings" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."geocode_cache" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."provider_usage" ENABLE ROW LEVEL SECURITY;
 -- Created by runMigrations() itself (CREATE TABLE IF NOT EXISTS), so it
 -- exists by the time you run this, but isn't in a migration file of its own.
 ALTER TABLE "public"."schema_migrations" ENABLE ROW LEVEL SECURITY;

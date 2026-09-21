@@ -65,6 +65,17 @@ export const env = {
   webSearchProvider: oneOf('WEB_SEARCH_PROVIDER', ['brave', 'google-cse', 'none'] as const, 'none'),
   photoProvider: oneOf('PHOTO_PROVIDER', ['google-places', 'none'] as const, 'none'),
 
+  /**
+   * Optional hard cap on web-search calls per calendar month, to stay inside
+   * a provider's free tier (e.g. Brave Search gives $5/month free credit,
+   * roughly 1,000 calls). Unset or 0 means no cap. Enforced in the database
+   * (src/lib/repo/provider-usage.ts), so it holds across restarts.
+   */
+  webSearchMonthlyLimit: (() => {
+    const n = int('WEB_SEARCH_MONTHLY_LIMIT', 0);
+    return n > 0 ? n : null;
+  })(),
+
   overpassEndpoint: str('OVERPASS_ENDPOINT', 'https://overpass-api.de/api/interpreter')!,
   nominatimEndpoint: str('NOMINATIM_ENDPOINT', 'https://nominatim.openstreetmap.org')!,
   osmUserAgent: str('OSM_USER_AGENT', 'LocalLeadList/0.1 (self-hosted)')!,
@@ -105,6 +116,7 @@ export const publicConfig = {
   isDemoMode,
   minChannelsForNoWebsite: env.minChannelsForNoWebsite,
   verificationTtlDays: env.verificationTtlDays,
+  webSearchMonthlyLimit: env.webSearchMonthlyLimit,
 } as const;
 
 export type PublicConfig = typeof publicConfig;
