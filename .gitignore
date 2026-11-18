@@ -32,5 +32,9 @@ tsconfig.tsbuildinfo
 # Deployment secrets written on the server
 deploy/hostinger/.env
 
-# Day-trader skills: local trading state (portfolio, orders, logs). Never commit.
-/trader/
+# Day-trader skills: trading state (portfolio, orders, logs) stays out of git.
+# Only the config, the to-do list and the journal are kept.
+/trader/*
+!/trader/config.json
+!/trader/TODO.md
+!/trader/journal.md
