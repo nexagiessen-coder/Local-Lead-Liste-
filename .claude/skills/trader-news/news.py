@@ -9,6 +9,7 @@ stock has moved today and a flag on anything that touches your tickers.
     python3 news.py --tickers TSLA NVDA AMD
     python3 news.py --tickers TSLA --all --hours 72  # everything in the last 3 days, seen or not
     python3 news.py --no-sec                         # headlines only
+    python3 news.py --no-press                       # skip Reuters and Bloomberg
     python3 news.py --no-moves                       # skip the price line per ticker
 
 Your tickers, when --tickers is not given: every hit in trader/watchlist.json
@@ -18,6 +19,15 @@ positions in trader/portfolio.json.
 Sources, one request each per ticker:
   - Yahoo Finance headline RSS:
     https://feeds.finance.yahoo.com/rss/2.0/headline?s=<TICKER>&region=US&lang=en-US
+  - Reuters and Bloomberg headlines, through Google News RSS search limited to
+    reuters.com and bloomberg.com (neither offers a free per-company feed).
+    The query is the company name (from Yahoo's chart data, cached in state)
+    or the ticker, and only stories whose HEADLINE names the company or ticker
+    are kept (market wraps that mention it in passing are dropped), so a
+    story about it that names neither in the headline is missed. Links go
+    through news.google.com; Bloomberg stories are usually paywalled:
+    https://news.google.com/rss/search?q=("<NAME>" OR <TICKER>) when:2d
+      (site:reuters.com OR site:bloomberg.com)&hl=en-US&gl=US&ceid=US:en
   - SEC EDGAR filings Atom feed for the company (8-K by default: earnings,
     executive changes, deals, restatements):
     https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=<CIK>&type=8-K&count=10&output=atom
@@ -49,10 +59,15 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
 YAHOO = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%s&region=US&lang=en-US"
+PRESS = "https://news.google.com/rss/search?q=%s&hl=en-US&gl=US&ceid=US:en"
+PRESS_SITES = (("reuters.com", "Reuters"), ("bloomberg.com", "Bloomberg"))
+NAME_SUFFIX = re.compile(r"[\s,]+(?:Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|"
+                         r"Limited|plc|Holdings?|N\.V\.|S\.A\.|AG|SE|Class [A-C]|Common Stock)$", re.I)
 CHART = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=5m"
 SEC_FEED = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=%s&type=%s"
             "&dateb=&owner=include&count=%d&output=atom")
@@ -302,7 +317,72 @@ def parse_chart(data, ticker):
     when = meta.get("regularMarketTime")
     return {"ticker": ticker, "price": round(float(price), 2), "prev_close": round(float(prev), 2),
             "pct": round((float(price) / float(prev) - 1) * 100, 2),
-            "time": _dt.datetime.fromtimestamp(when, _dt.timezone.utc) if when else None}
+            "time": _dt.datetime.fromtimestamp(when, _dt.timezone.utc) if when else None,
+            "name": meta.get("longName") or meta.get("shortName")}
+
+
+def clean_name(name):
+    """'The Coca-Cola Company' -> 'Coca-Cola', 'NVIDIA Corporation' -> 'NVIDIA'."""
+    n = (name or "").split(" - ")[0].strip()
+    n = re.sub(r"\s*\(The\)$", "", n)
+    n = re.sub(r"^The\s+", "", n)
+    prev = None
+    while prev != n:
+        prev, n = n, NAME_SUFFIX.sub("", n).strip()
+    return n
+
+
+def press_url(ticker, name, hours=48):
+    """Google News RSS search for this company on Reuters and Bloomberg only."""
+    terms = []
+    name = clean_name(name)
+    if name:
+        terms.append('"%s"' % name.replace('"', ""))
+    if len(ticker) >= 3 or not terms:  # "KO" or "F" alone would match noise
+        terms.append(ticker)
+    who = terms[0] if len(terms) == 1 else "(%s)" % " OR ".join(terms)
+    days = max(1, -(-int(hours) // 24))
+    sites = " OR ".join("site:" + d for d, _ in PRESS_SITES)
+    return PRESS % urllib.parse.quote_plus("%s when:%dd (%s)" % (who, days, sites))
+
+
+def names_company(title, ticker, name):
+    """Does the headline itself name the company (any case) or its ticker?"""
+    name = clean_name(name)
+    if name and re.search(r"\b%s\b" % re.escape(name).replace(r"\ ", r"[\s-]"), title, re.I):
+        return True
+    return len(ticker) >= 3 and re.search(r"\b%s\b" % re.escape(ticker), title) is not None
+
+
+QUOTE_PAGE = re.compile(r"\|\s*Stock Price|\bStock Quote\b", re.I)
+
+
+def parse_press(data, ticker):
+    """Google News RSS -> Reuters and Bloomberg items; anything else is dropped."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise NewsError("Reuters/Bloomberg feed for %s is not valid XML: %s" % (ticker, exc))
+    out = []
+    for it in root.iter("item"):
+        src = it.find("source")
+        host = (urllib.parse.urlparse(src.get("url", "")).hostname or "") if src is not None else ""
+        outlet = next((label for dom, label in PRESS_SITES
+                       if host == dom or host.endswith("." + dom)), None)
+        if not outlet:
+            continue
+        title = _text(it, "title")
+        tail = " - %s" % (src.text or "").strip()
+        if tail != " - " and title.endswith(tail):
+            title = title[:-len(tail)].rstrip()
+        if QUOTE_PAGE.search(title):  # a quote page, not a story
+            continue
+        link = _text(it, "link")
+        guid = _text(it, "guid") or link
+        out.append({"id": "press:" + guid, "source": outlet, "kind": "headline",
+                    "ticker": ticker, "title": title, "summary": "",
+                    "link": link, "time": parse_time(_text(it, "pubDate"))})
+    return out
 
 
 def collect_moves(fetcher, watch, errors=None):
@@ -378,7 +458,8 @@ def fingerprint(it):
 
 # ---------------------------------------------------------------- the check
 
-def collect(fetcher, watch, state, sec=True, forms=("8-K",), count=10, errors=None):
+def collect(fetcher, watch, state, sec=True, forms=("8-K",), count=10, errors=None,
+            press=True, hours=48):
     errors = [] if errors is None else errors
     items = []
     for t in sorted(watch):
@@ -386,6 +467,16 @@ def collect(fetcher, watch, state, sec=True, forms=("8-K",), count=10, errors=No
             items += parse_rss(fetcher.get(YAHOO % yahoo_symbol(t), "yahoo-%s.xml" % t), t)
         except NewsError as exc:
             errors.append("headlines for %s: %s" % (t, exc))
+    if press:
+        for t in sorted(watch):
+            try:
+                data = fetcher.get(press_url(t, watch.get(t), hours), "press-%s.xml" % t)
+                # The search matches article bodies too; keep stories whose headline is about it.
+                items += [it for it in parse_press(data, t)
+                          if names_company(it["title"], t, watch.get(t))]
+            except NewsError as exc:
+                if not (fetcher.offline and "no file" in str(exc)):
+                    errors.append("Reuters/Bloomberg for %s: %s" % (t, exc))
     if sec:
         try:
             ciks = cik_map(fetcher, state)
@@ -489,6 +580,7 @@ def main(argv=None):
     ap.add_argument("--all", action="store_true", help="show seen items too")
     ap.add_argument("--forms", default="8-K", help="SEC forms to watch, comma separated")
     ap.add_argument("--no-sec", action="store_true", help="headlines only")
+    ap.add_argument("--no-press", action="store_true", help="skip Reuters and Bloomberg")
     ap.add_argument("--no-moves", action="store_true", help="skip the price line per ticker")
     ap.add_argument("--move-pct", type=float, default=MOVE_PCT, help="flag a move this big (percent)")
     ap.add_argument("--user-agent", help="SEC User-Agent: \"Your Name you@example.com\"")
@@ -520,10 +612,23 @@ def main(argv=None):
         sec = False
     fetcher = Fetcher(ua, offline=args.offline)
     forms = [f.strip().upper() for f in args.forms.split(",") if f.strip()]
-    items = collect(fetcher, watch, state, sec=sec, forms=forms, errors=errors)
+    press = not args.no_press
+    # The chart carries the company name, which the Reuters/Bloomberg search needs.
+    names = state.setdefault("names", {})
+    charts = []
+    if not args.no_moves or (press and any(not watch[t] and t not in names for t in watch)):
+        charts = collect_moves(fetcher, watch, errors)
+    for m in charts:
+        if m.get("name"):
+            names[m["ticker"]] = m["name"]
+    for t in watch:
+        if not watch[t] and names.get(t):
+            watch[t] = clean_name(names[t]) or None
+    items = collect(fetcher, watch, state, sec=sec, forms=forms, errors=errors,
+                    press=press, hours=args.hours)
     items = dedupe(tag(items, watch))
     shown = select(items, state, now, hours=args.hours, show_all=args.all)
-    moves = [] if args.no_moves else collect_moves(fetcher, watch, errors)
+    moves = [] if args.no_moves else charts
     if args.json:
         mv = [dict(m, time=m["time"].isoformat() if m.get("time") else None,
                    moving=abs(m["pct"]) >= args.move_pct) for m in moves]

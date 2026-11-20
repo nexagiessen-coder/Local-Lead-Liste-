@@ -2,7 +2,8 @@
 name: trader-news
 description: >-
   News Monitor. Tracks breaking news on every stock you watch and flags what
-  moves it: Yahoo Finance headlines per ticker, each company's 8-K filings on
+  moves it: Yahoo Finance headlines per ticker, Reuters and Bloomberg
+  headlines that name the company, each company's 8-K filings on
   SEC EDGAR (earnings, CEO changes, deals, restatements, bankruptcy) and how
   far each stock is from yesterday's close. Shows only what is new since the
   last check, newest first, in New York time, tags each item (earnings,
@@ -27,6 +28,7 @@ Tool in this folder (standard library Python, no keys):
 python3 "${CLAUDE_SKILL_DIR}/news.py"                         # watchlist + plan + portfolio
 python3 "${CLAUDE_SKILL_DIR}/news.py" --tickers TSLA NVDA --hours 12
 python3 "${CLAUDE_SKILL_DIR}/news.py" --no-sec --json
+python3 "${CLAUDE_SKILL_DIR}/news.py" --no-press             # skip Reuters and Bloomberg
 ```
 
 ## What it reads and writes
@@ -37,9 +39,10 @@ python3 "${CLAUDE_SKILL_DIR}/news.py" --no-sec --json
 | `trader/plan.json` | the trade you are planning (trader-exit) |
 | `trader/portfolio.json` | what you hold (trader-broker records fills there) |
 | Yahoo Finance headline RSS | `https://feeds.finance.yahoo.com/rss/2.0/headline?s=TSLA&region=US&lang=en-US` |
-| Yahoo Finance chart endpoint | the last price against yesterday's close (unofficial, can lag) |
+| Reuters and Bloomberg via Google News RSS | one search per ticker, limited to reuters.com and bloomberg.com: `("<company name>" OR <ticker>) when:2d`. Only stories whose headline names the company or ticker are kept, so market wraps that mention it in passing are dropped. Links open through news.google.com; Bloomberg is usually paywalled. Needs `news.google.com` on the network allowlist |
+| Yahoo Finance chart endpoint | the last price against yesterday's close (unofficial, can lag), and the company name the Reuters/Bloomberg search uses |
 | SEC EDGAR company Atom feed | 8-K by default (`--forms 8-K,10-Q` for more); needs `sec_user_agent` in `trader/config.json` or `SEC_USER_AGENT`, else filings are skipped with a note |
-| `trader/state/news.json` | what has been shown (kept 30 days) and each ticker's CIK |
+| `trader/state/news.json` | what has been shown (kept 30 days), each ticker's CIK and company name |
 
 ## The rules
 
